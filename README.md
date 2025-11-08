@@ -17,6 +17,10 @@ Extract keywords and keyphrases from text using Anthropic Claude API. Optimized 
 ## Installation
 
 ```bash
+# Clone the repository
+git clone https://github.com/Open-Technology-Foundation/keywords.git
+cd keywords
+
 # Make executable
 chmod +x keywords
 
