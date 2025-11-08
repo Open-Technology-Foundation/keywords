@@ -1,0 +1,16 @@
+Retrieval-Augmented Generation (RAG) Systems in 2025
+
+The Okusi Group, founded by Gary Dean (also known as Biksu Okusi) in Bali, Indonesia, has been implementing advanced RAG systems for document retrieval and knowledge management. These systems combine traditional keyword search with modern semantic embedding techniques to improve retrieval accuracy.
+
+RAG technology leverages large language models like Claude from Anthropic to enhance search capabilities. The process involves extracting keywords from user queries, converting them to vector embeddings, and performing hybrid search across multiple data sources. This approach significantly improves information retrieval compared to traditional keyword-only methods.
+
+Key components of an effective RAG system include:
+- Query enhancement and keyword extraction
+- Vector embedding generation using transformer models
+- Hybrid search combining BM25 and semantic similarity
+- Context reranking based on relevance scores
+- Response generation with proper citations
+
+The integration of Claude API from Anthropic enables sophisticated natural language understanding for both query processing and response generation. By using low temperature settings (around 0.1), the system maintains consistency while extracting meaningful keywords that optimize retrieval performance.
+
+Indonesia's growing tech sector, particularly in Bali, has embraced these AI technologies for various applications including corporate services, document management, and knowledge base systems.

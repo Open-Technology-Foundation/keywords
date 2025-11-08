@@ -1,0 +1,539 @@
+#!/usr/bin/env bash
+# keywords - Extract keywords/keyphrases from text using Anthropic Claude
+# Optimized for web search and RAG retrieval systems
+
+set -euo pipefail
+shopt -s inherit_errexit nullglob extglob
+
+# Script metadata
+declare -r VERSION='1.0.0'
+declare -r SCRIPT_PATH=$(realpath -- "${BASH_SOURCE[0]}")
+declare -r SCRIPT_NAME=${SCRIPT_PATH##*/}
+
+# Configuration
+declare -- ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
+declare -- ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-haiku-4-5}"
+declare -- API_URL='https://api.anthropic.com/v1/messages'
+declare -- API_VERSION='2023-06-01'
+
+# Default options
+declare -i MAX_KEYWORDS=20
+declare -i VERBOSE=1
+declare -i DRY_RUN=0
+declare -i STOPWORDS=0
+declare -i USE_CACHE=1
+declare -i INCLUDE_SCORES=0
+declare -i INCLUDE_TYPES=0
+declare -i INCLUDE_ENTITIES=0
+declare -- OUTPUT_FORMAT='text'
+declare -- CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/keywords"
+declare -- MIN_SCORE='0.0'
+declare -i API_TIMEOUT=60
+declare -- TEMPERATURE='0.1'
+declare -i MAX_TOKENS=2000
+
+# Statistics
+declare -i CACHE_HITS=0
+declare -i API_CALLS=0
+
+# Colors
+if [[ -t 1 && -t 2 ]]; then
+  declare -r RED=$'\033[0;31m' GREEN=$'\033[0;32m' YELLOW=$'\033[0;33m' CYAN=$'\033[0;36m' NC=$'\033[0m'
+else
+  declare -r RED='' GREEN='' YELLOW='' CYAN='' NC=''
+fi
+
+# Messaging functions
+_msg() {
+  local -- prefix="$SCRIPT_NAME:"
+  case ${FUNCNAME[1]} in
+    info)    prefix+=" ${CYAN}◉${NC}" ;;
+    warn)    prefix+=" ${YELLOW}▲${NC}" ;;
+    success) prefix+=" ${GREEN}✓${NC}" ;;
+    error)   prefix+=" ${RED}✗${NC}" ;;
+  esac
+  printf '%s %s\n' "$prefix" "$1"
+}
+
+info() { ((VERBOSE)) || return 0; >&2 _msg "$@"; }
+warn() { >&2 _msg "$@"; }
+success() { ((VERBOSE)) || return 0; >&2 _msg "$@"; }
+error() { >&2 _msg "$@"; }
+die() { (($# > 1)) && error "${@:2}"; exit "${1:-0}"; }
+
+# Show usage
+show_usage() {
+  cat <<EOF
+$SCRIPT_NAME $VERSION - Extract keywords and keyphrases from text
+
+Usage: $SCRIPT_NAME [OPTIONS] [FILE]
+
+Extract keywords and keyphrases from text using Anthropic Claude.
+Optimized for web search and RAG retrieval systems.
+
+INPUT:
+  FILE                    Input text file (or read from stdin)
+
+OPTIONS:
+  -h, --help              Show this help
+  -V, --version           Print version
+  -m, --model MODEL       Claude model to use:
+                            haiku-4-5  (default, fast & cost-effective)
+                            sonnet-4-5 (advanced, better accuracy)
+                            opus-4-5   (premium, best quality)
+  -n, --max-keywords N    Maximum keywords to extract (default: 10)
+  -f, --format FORMAT     Output format:
+                            text  (default, one per line)
+                            json  (structured with metadata)
+                            csv   (term,score,type)
+  -s, --scores            Include relevance scores (0.0-1.0)
+  -t, --types             Include keyword types (concept/technical/entity)
+  -e, --entities          Extract named entities separately
+  --min-score FLOAT       Minimum relevance score filter (default: 0.0)
+  -S, --stopwords         Remove stopwords from input text (requires stopwords)
+  --no-cache              Disable result caching
+  --cache-dir DIR         Cache directory (default: ~/.cache/keywords)
+  -v, --verbose           Verbose output
+  -q, --quiet             Quiet mode (no progress messages)
+  --dry-run               Show what would be done without API calls
+
+ENVIRONMENT:
+  ANTHROPIC_API_KEY       Required: Your Anthropic API key
+  ANTHROPIC_MODEL         Override default model
+
+EXAMPLES:
+  # Extract keywords from file (text output)
+  $SCRIPT_NAME document.txt
+
+  # Use advanced model with scores
+  $SCRIPT_NAME -m sonnet-4-5 -s document.txt
+
+  # JSON output with entity extraction
+  $SCRIPT_NAME -f json -e document.txt
+
+  # From stdin
+  echo 'Text about Claude API and RAG systems' | $SCRIPT_NAME
+
+  # Batch processing
+  for file in docs/*.txt; do
+    $SCRIPT_NAME "\$file" > "keywords/\$(basename "\${file%.txt}").txt"
+  done
+EOF
+}
+
+# Generate cache key from text
+generate_cache_key() {
+  local -- text=$1
+  local -- params="${ANTHROPIC_MODEL}:${MAX_KEYWORDS}:${INCLUDE_ENTITIES}:${MIN_SCORE}"
+  printf '%s' "$text$params" | sha256sum | cut -d' ' -f1
+}
+
+# Get cached result
+get_cached_result() {
+  local -- cache_key=$1
+  local -- cache_file="$CACHE_DIR"/"$cache_key".json
+
+  [[ -f "$cache_file" ]] || return 1
+
+  # Check if cache is fresh (24 hours)
+  local -i cache_age
+  cache_age=$(( $(date +%s) - $(stat -c %Y "$cache_file") ))
+  ((cache_age < 86400)) || { rm -f "$cache_file"; return 1; }
+
+  cat "$cache_file"
+  CACHE_HITS+=1
+  return 0
+}
+
+# Save result to cache
+save_to_cache() {
+  local -- cache_key=$1
+  local -- result=$2
+  local -- cache_file="$CACHE_DIR"/"$cache_key".json
+
+  [[ -d "$CACHE_DIR" ]] || mkdir -p "$CACHE_DIR"
+  printf '%s' "$result" > "$cache_file"
+}
+
+# Build extraction prompt
+build_prompt() {
+  local -- text=$1
+  local -- entity_instruction=''
+
+  if ((INCLUDE_ENTITIES)); then
+    entity_instruction='
+- Named entities (people, organizations, locations, products)
+- Proper nouns and brand names'
+  fi
+
+  cat <<EOF
+<task>
+Extract the ${MAX_KEYWORDS} most important keywords and keyphrases from the text below.
+Focus on terms that would be most useful for search queries and document retrieval.
+</task>
+
+<instructions>
+1. Identify key concepts, topics, and themes
+2. Preserve multi-word phrases (2-4 words) when they represent single concepts${entity_instruction}
+3. Include technical terms and domain-specific vocabulary
+4. Rank by relevance and importance
+5. Assign relevance scores (0.0-1.0, where 1.0 is most important)
+6. Categorize each term by type:
+   - concept: Abstract ideas, themes, methodologies
+   - technical: Technologies, tools, frameworks, APIs
+   - entity: People, organizations, locations, products
+   - action: Key processes, activities, operations
+</instructions>
+
+<text>
+${text}
+</text>
+
+<output_format>
+Return ONLY valid JSON with this exact structure (no other text):
+{
+  "keywords": [
+    {"term": "example phrase", "score": 0.95, "type": "concept"},
+    {"term": "another term", "score": 0.88, "type": "technical"}
+  ]
+}
+</output_format>
+EOF
+}
+
+# Call Anthropic API
+call_anthropic_api() {
+  local -- prompt=$1
+  local -- response
+
+  info "Calling Anthropic API ${ANTHROPIC_MODEL@Q} ..."
+
+  # Build API request
+  local -- request_body
+  request_body=$(jq -n \
+    --arg model "$ANTHROPIC_MODEL" \
+    --argjson max_tokens "$MAX_TOKENS" \
+    --arg temperature "$TEMPERATURE" \
+    --arg prompt "$prompt" \
+    '{
+      model: $model,
+      max_tokens: $max_tokens,
+      temperature: ($temperature | tonumber),
+      messages: [
+        {
+          role: "user",
+          content: $prompt
+        }
+      ]
+    }')
+
+  # Make API call
+  response=$(curl -s --max-time "$API_TIMEOUT" \
+    -X POST "$API_URL" \
+    -H "x-api-key: $ANTHROPIC_API_KEY" \
+    -H "anthropic-version: $API_VERSION" \
+    -H "content-type: application/json" \
+    -d "$request_body") || {
+    error 'API request failed'
+    return 1
+  }
+
+  # Check for API errors
+  if jq -e '.error' <<< "$response" >/dev/null 2>&1; then
+    local -- error_type error_message
+    error_type=$(jq -r '.error.type' <<< "$response")
+    error_message=$(jq -r '.error.message' <<< "$response")
+    error "API error ${error_type@Q}: $error_message"
+    return 1
+  fi
+
+  # Extract content
+  local -- content
+  content=$(jq -r '.content[0].text' <<< "$response") || {
+    error 'Failed to parse API response'
+    return 1
+  }
+
+  printf '%s' "$content"
+  ((API_CALLS+=1))
+}
+
+# Parse and validate JSON result
+parse_json_result() {
+  local -- json_text=$1
+
+  # Try direct parsing first
+  if jq -e '.keywords' <<< "$json_text" >/dev/null 2>&1; then
+    printf '%s' "$json_text"
+    return 0
+  fi
+
+  # Try extracting JSON from markdown code blocks
+  local -- extracted
+  extracted=$(sed -n '/^```json$/,/^```$/p' <<< "$json_text" | sed '1d;$d')
+  if [[ -n "$extracted" ]] && jq -e '.keywords' <<< "$extracted" >/dev/null 2>&1; then
+    printf '%s' "$extracted"
+    return 0
+  fi
+
+  # Try extracting any JSON object
+  extracted=$(grep -oP '\{(?:[^{}]|(?R))*\}' <<< "$json_text" | head -1)
+  if [[ -n "$extracted" ]] && jq -e '.keywords' <<< "$extracted" >/dev/null 2>&1; then
+    printf '%s' "$extracted"
+    return 0
+  fi
+
+  error 'Could not parse valid JSON from response'
+  return 1
+}
+
+# Filter by minimum score
+filter_by_score() {
+  local -- json=$1
+  jq --arg min_score "$MIN_SCORE" '
+    .keywords |= map(select(.score >= ($min_score | tonumber)))
+  ' <<< "$json"
+}
+
+# Format output as text
+format_as_text() {
+  local -- json=$1
+
+  if ((INCLUDE_SCORES)) && ((INCLUDE_TYPES)); then
+    jq -r '.keywords[] | "\(.term)|\(.score)|\(.type)"' <<< "$json"
+  elif ((INCLUDE_SCORES)); then
+    jq -r '.keywords[] | "\(.term)|\(.score)"' <<< "$json"
+  elif ((INCLUDE_TYPES)); then
+    jq -r '.keywords[] | "\(.term)|\(.type)"' <<< "$json"
+  else
+    jq -r '.keywords[].term' <<< "$json"
+  fi
+}
+
+# Format output as CSV
+format_as_csv() {
+  local -- json=$1
+
+  if ((INCLUDE_SCORES)) && ((INCLUDE_TYPES)); then
+    echo "term,score,type"
+    jq -r '.keywords[] | [.term, .score, .type] | @csv' <<< "$json"
+  elif ((INCLUDE_SCORES)); then
+    echo "term,score"
+    jq -r '.keywords[] | [.term, .score] | @csv' <<< "$json"
+  elif ((INCLUDE_TYPES)); then
+    echo "term,type"
+    jq -r '.keywords[] | [.term, .type] | @csv' <<< "$json"
+  else
+    echo "term"
+    jq -r '.keywords[].term' <<< "$json"
+  fi
+}
+
+# Format output as JSON
+format_as_json() {
+  local -- json=$1
+
+  # Add metadata
+  jq --arg model "$ANTHROPIC_MODEL" \
+     --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     --argjson api_calls "$API_CALLS" \
+     --argjson cache_hits "$CACHE_HITS" \
+     '. + {
+       metadata: {
+         model: $model,
+         timestamp: $timestamp,
+         extraction_method: "llm",
+         api_calls: $api_calls,
+         cache_hits: $cache_hits
+       }
+     }' <<< "$json"
+}
+
+# Extract keywords from text
+extract_keywords() {
+  local -- input_text=$1
+  local -- cache_key result json_result
+
+  # Validate input
+  [[ -n "$input_text" ]] || { error 'Empty input text'; return 1; }
+
+  local -i text_length=${#input_text}
+  ((text_length > 50)) || { error 'Input too short (minimum 50 characters)'; return 1; }
+  ((text_length < 200000)) || warn "Large input (${text_length} chars) may be slow"
+
+  # Check cache
+  if ((USE_CACHE)); then
+    cache_key=$(generate_cache_key "$input_text")
+    if result=$(get_cached_result "$cache_key"); then
+      success "Cache hit"
+      json_result=$result
+    fi
+  fi
+
+  # Call API if not cached
+  if [[ -z "${json_result:-}" ]]; then
+    if ((DRY_RUN)); then
+      info "DRY-RUN: Would call API with ${text_length} characters"
+      json_result='{"keywords":[{"term":"dry-run","score":1.0,"type":"test"}]}'
+    else
+      local -- prompt
+      prompt=$(build_prompt "$input_text")
+
+      local -- api_response
+      api_response=$(call_anthropic_api "$prompt") || return 1
+
+      json_result=$(parse_json_result "$api_response") || return 1
+
+      # Save to cache
+      if ((USE_CACHE)); then
+        save_to_cache "$cache_key" "$json_result"
+        success 'Result cached'
+      fi
+    fi
+  fi
+
+  # Filter by score
+  [[ "$MIN_SCORE" == "0.0" ]] || json_result=$(filter_by_score "$json_result")
+
+  # Format output
+  case $OUTPUT_FORMAT in
+    text)  format_as_text "$json_result" ;;
+    csv)   format_as_csv "$json_result" ;;
+    json)  format_as_json "$json_result" ;;
+    *)     error "Unknown format ${OUTPUT_FORMAT@Q}"; return 1 ;;
+  esac
+}
+
+# Validate model name and convert to full ID
+validate_and_expand_model() {
+  local -- model=$1
+
+  case $model in
+    haiku|haiku-4-5)
+      ANTHROPIC_MODEL='claude-haiku-4-5'
+      ;;
+    sonnet|sonnet-4-5)
+      ANTHROPIC_MODEL='claude-sonnet-4-5'
+      ;;
+    opus|opus-4-5)
+      ANTHROPIC_MODEL='claude-opus-4-5'
+      ;;
+    claude-haiku-4-5-*|claude-sonnet-4-5-*|claude-opus-4-5-*)
+      ANTHROPIC_MODEL=$model
+      ;;
+    *)
+      die 2 "Invalid model ${model@Q} (use haiku-4-5, sonnet-4-5, or opus-4-5)"
+      ;;
+  esac
+}
+
+# Main
+main() {
+  local -- input_file='' input_text=''
+
+  # Parse arguments
+  while (($#)); do
+    case $1 in
+      -h|--help)
+        show_usage
+        exit 0
+        ;;
+      -V|--version)
+        echo "$SCRIPT_NAME $VERSION"
+        exit 0
+        ;;
+      -m|--model)
+        (($# > 1)) || die 2 "Missing value for ${1@Q}"
+        validate_and_expand_model "$2"
+        shift
+        ;;
+      -n|--max-keywords)
+        (($# > 1)) || die 2 "Missing value for ${1@Q}"
+        MAX_KEYWORDS=$2
+        ((MAX_KEYWORDS > 0)) || die 2 "Invalid max-keywords for ${1@Q} (must be > 0)"
+        shift
+        ;;
+      -f|--format)
+        (($# > 1)) || die 2 "Missing value for ${1@Q}"
+        OUTPUT_FORMAT=$2
+        [[ "$OUTPUT_FORMAT" =~ ^(text|json|csv)$ ]] || die 2 'Invalid format (use text, json, or csv)'
+        shift
+        ;;
+      -s|--scores)
+        INCLUDE_SCORES=1
+        ;;
+      -t|--types)
+        INCLUDE_TYPES=1
+        ;;
+      -e|--entities)
+        INCLUDE_ENTITIES=1
+        ;;
+      --min-score)
+        (($# > 1)) || die 2 "Missing value for ${1@Q}"
+        MIN_SCORE=$2
+        shift
+        ;;
+      -S|--stopwords)
+        command -v stopwords >/dev/null || die 1 'stopwords not found'
+        STOPWORDS=1
+        ;;
+      --no-cache)
+        USE_CACHE=0
+        ;;
+      --cache-dir)
+        (($# > 1)) || die 2 "Missing value for ${1@Q}"
+        CACHE_DIR=$2
+        shift
+        ;;
+      -v|--verbose)
+        VERBOSE=1
+        ;;
+      -q|--quiet)
+        VERBOSE=0
+        ;;
+      --dry-run)
+        DRY_RUN=1
+        ;;
+      -[hVnfsteSvq]*) #shellcheck disable=SC2046
+                   set -- '' $(printf -- "-%c " $(grep -o . <<<"${1:1}")) "${@:2}" ;;
+      -*)
+        die 2 "Unknown option ${1@Q}"
+        ;;
+      *)
+        input_file=$1
+        ;;
+    esac
+    shift
+  done
+
+  # Validate API key
+  [[ -n "$ANTHROPIC_API_KEY" ]] || die 1 'ANTHROPIC_API_KEY environment variable not set'
+
+  # Read input
+  if [[ -n "$input_file" ]]; then
+    [[ -f "$input_file" ]] || die 1 "File not found ${input_file@Q}"
+    [[ -r "$input_file" ]] || die 1 "File not readable ${input_file@Q}"
+    input_text=$(<"$input_file")
+    info "Reading from ${input_file@Q}"
+  else
+    [[ -t 0 ]] && die 1 'No input file specified and stdin is a terminal'
+    input_text=$(cat)
+    info 'Reading from stdin'
+  fi
+
+  ((STOPWORDS)) && input_text=$(stopwords -p "$input_text")
+
+  # Extract keywords
+  extract_keywords "$input_text" || exit 1
+
+  # Show statistics if verbose
+  if ((VERBOSE)); then
+    >&2 echo
+    success 'Extraction complete'
+    ((API_CALLS > 0)) && info "API calls: $API_CALLS"
+    ((CACHE_HITS > 0)) && info "Cache hits: $CACHE_HITS"
+  fi
+}
+
+main "$@"
+#fin
