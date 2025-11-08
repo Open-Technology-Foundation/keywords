@@ -5,8 +5,8 @@
 Check the version:
 
 ```bash
-$ extract-keywords --version
-extract-keywords 1.0.0
+$ keywords --version
+keywords 1.0.0
 ```
 
 ## Setup
@@ -22,7 +22,7 @@ export ANTHROPIC_API_KEY='sk-ant-your-key-here'
 ### Extract keywords (text output)
 
 ```bash
-$ extract-keywords test-sample.txt
+$ keywords test-sample.txt
 retrieval-augmented generation
 RAG systems
 Claude API
@@ -38,9 +38,9 @@ natural language processing
 ### From stdin
 
 ```bash
-$ cat test-sample.txt | extract-keywords
+$ cat test-sample.txt | keywords
 
-$ echo "Machine learning and artificial intelligence are transforming technology." | extract-keywords
+$ echo "Machine learning and artificial intelligence are transforming technology." | keywords
 ```
 
 ## Output Formats
@@ -48,7 +48,7 @@ $ echo "Machine learning and artificial intelligence are transforming technology
 ### Plain text with scores
 
 ```bash
-$ extract-keywords --scores test-sample.txt
+$ keywords --scores test-sample.txt
 retrieval-augmented generation|0.95
 RAG systems|0.92
 Claude API|0.88
@@ -59,7 +59,7 @@ semantic search|0.82
 ### CSV format
 
 ```bash
-$ extract-keywords --format csv --scores --types test-sample.txt
+$ keywords --format csv --scores --types test-sample.txt
 term,score,type
 "retrieval-augmented generation",0.95,concept
 "RAG systems",0.92,concept
@@ -71,7 +71,7 @@ term,score,type
 ### JSON format
 
 ```bash
-$ extract-keywords --format json --entities test-sample.txt
+$ keywords --format json --entities test-sample.txt
 {
   "keywords": [
     {
@@ -106,13 +106,16 @@ Combine short options for brevity:
 
 ```bash
 # Instead of: -s -t -v
-$ extract-keywords -stv test-sample.txt
+$ keywords -stv test-sample.txt
 
 # Instead of: -f json -e -s
-$ extract-keywords -fjes test-sample.txt
+$ keywords -fjes test-sample.txt
+
+# With stopwords: -S (uppercase for stopwords, -s lowercase for scores)
+$ keywords -Sst test-sample.txt
 
 # Note: Options requiring values (like -f, -m, -n) must come last in bundled form
-$ extract-keywords -st -f json test-sample.txt
+$ keywords -st -f json test-sample.txt
 ```
 
 ## Model Selection
@@ -120,44 +123,71 @@ $ extract-keywords -st -f json test-sample.txt
 ### Use Haiku (default - fast and economical)
 
 ```bash
-$ extract-keywords test-sample.txt
+$ keywords test-sample.txt
 # or explicitly:
-$ extract-keywords --model haiku-4-5 test-sample.txt
+$ keywords --model haiku-4-5 test-sample.txt
 
 # Using short model name:
-$ extract-keywords -m haiku test-sample.txt
+$ keywords -m haiku test-sample.txt
 ```
 
 ### Use Sonnet (better accuracy for complex text)
 
 ```bash
-$ extract-keywords --model sonnet-4-5 test-sample.txt
+$ keywords --model sonnet-4-5 test-sample.txt
 # or simply:
-$ extract-keywords -m sonnet test-sample.txt
+$ keywords -m sonnet test-sample.txt
 ```
 
 ### Use Opus (best quality)
 
 ```bash
-$ extract-keywords --model opus-4-5 test-sample.txt
+$ keywords --model opus-4-5 test-sample.txt
 # or simply:
-$ extract-keywords -m opus test-sample.txt
+$ keywords -m opus test-sample.txt
 ```
 
 ### Using specific model versions
 
 ```bash
 # Use a specific dated version
-$ extract-keywords -m claude-haiku-4-5-20250929 test-sample.txt
+$ keywords -m claude-haiku-4-5-20250929 test-sample.txt
 ```
 
 ## Advanced Features
+
+### Stopwords Filtering
+
+Remove common words before extraction (requires [stopwords.bash](https://github.com/Open-Technology-Foundation/stopwords.bash)):
+
+```bash
+# Remove stopwords for cleaner extraction
+$ keywords -S test-sample.txt
+
+# Combine with other options
+$ keywords -Sst test-sample.txt
+
+# With JSON output
+$ keywords -Sf json test-sample.txt
+```
+
+**Benefits:**
+- Reduces API costs (shorter input)
+- Focuses on meaningful content words
+- Removes filler words (the, and, or, etc.)
+
+**Installation:**
+```bash
+git clone https://github.com/Open-Technology-Foundation/stopwords.bash
+cd stopwords.bash
+sudo make install
+```
 
 ### Filter by minimum score
 
 ```bash
 # Only keywords with score >= 0.8
-$ extract-keywords --scores --min-score 0.8 test-sample.txt
+$ keywords --scores --min-score 0.8 test-sample.txt
 retrieval-augmented generation|0.95
 RAG systems|0.92
 Claude API|0.88
@@ -168,13 +198,14 @@ semantic search|0.82
 ### Extract more keywords
 
 ```bash
-$ extract-keywords --max-keywords 20 test-sample.txt
+# Extract 30 keywords (default is 20)
+$ keywords --max-keywords 30 test-sample.txt
 ```
 
 ### Extract with types
 
 ```bash
-$ extract-keywords --types test-sample.txt
+$ keywords --types test-sample.txt
 retrieval-augmented generation|concept
 RAG systems|concept
 Claude API|technical
@@ -186,13 +217,13 @@ Gary Dean|entity
 ### Disable caching for fresh results
 
 ```bash
-$ extract-keywords --no-cache test-sample.txt
+$ keywords --no-cache test-sample.txt
 ```
 
 ### Custom cache directory
 
 ```bash
-$ extract-keywords --cache-dir /tmp/keywords-cache test-sample.txt
+$ keywords --cache-dir /tmp/keywords-cache test-sample.txt
 ```
 
 ## Batch Processing
@@ -203,7 +234,7 @@ $ extract-keywords --cache-dir /tmp/keywords-cache test-sample.txt
 # Process all text files in a directory
 for file in documents/*.txt; do
   output="keywords/$(basename "${file%.txt}").txt"
-  extract-keywords "$file" > "$output"
+  keywords "$file" > "$output"
   echo "Processed: $file -> $output"
 done
 ```
@@ -214,7 +245,7 @@ done
 # Create a CSV index of all documents
 echo "file,keywords" > index.csv
 for file in docs/*.txt; do
-  keywords=$(extract-keywords --max-keywords 5 "$file" | tr '\n' ';')
+  keywords=$(keywords --max-keywords 5 "$file" | tr '\n' ';')
   echo "\"$file\",\"$keywords\"" >> index.csv
 done
 ```
@@ -228,7 +259,7 @@ first=1
 for file in docs/*.txt; do
   [[ $first -eq 0 ]] && echo "," >> all-keywords.json
   echo "{\"file\":\"$file\"," >> all-keywords.json
-  extract-keywords --format json "$file" | \
+  keywords --format json "$file" | \
     jq '.keywords' | \
     sed 's/^/  "keywords": /' >> all-keywords.json
   echo "}" >> all-keywords.json
@@ -244,13 +275,13 @@ echo "]" >> all-keywords.json
 ```bash
 $ curl -s https://example.com/article.html | \
   html2text | \
-  extract-keywords --max-keywords 8
+  keywords --max-keywords 8
 ```
 
 ### Combine with grep for filtering
 
 ```bash
-$ extract-keywords test-sample.txt | grep -i "API"
+$ keywords test-sample.txt | grep -i "API"
 Claude API
 ```
 
@@ -258,11 +289,11 @@ Claude API
 
 ```bash
 # Extract only technical keywords
-$ extract-keywords --format json --types test-sample.txt | \
+$ keywords --format json --types test-sample.txt | \
   jq -r '.keywords[] | select(.type == "technical") | .term'
 
 # Count keywords by type
-$ extract-keywords --format json --types test-sample.txt | \
+$ keywords --format json --types test-sample.txt | \
   jq '[.keywords[].type] | group_by(.) | map({type: .[0], count: length})'
 ```
 
@@ -275,7 +306,7 @@ $ extract-keywords --format json --types test-sample.txt | \
 # Generate optimized search query from document
 
 document="$1"
-keywords=$(extract-keywords --max-keywords 5 --scores "$document" | \
+keywords=$(keywords --max-keywords 5 --scores "$document" | \
   cut -d'|' -f1 | \
   head -3 | \
   paste -sd ' OR ' -)
@@ -292,7 +323,7 @@ echo "Search query: $keywords"
 
 for doc in corpus/*.txt; do
   doc_id=$(basename "${doc%.txt}")
-  keywords=$(extract-keywords --format json --scores --types "$doc")
+  keywords=$(keywords --format json --scores --types "$doc")
 
   # Store in your vector database
   # curl -X POST "http://localhost:8000/index" \
@@ -308,12 +339,12 @@ done
 ### First run (API call)
 
 ```bash
-$ time extract-keywords test-sample.txt
-extract-keywords: ◉ Reading from 'test-sample.txt'
-extract-keywords: ◉ Calling Anthropic API 'claude-haiku-4-5' ...
-extract-keywords: ✓ Result cached
-extract-keywords: ✓ Extraction complete
-extract-keywords: ◉ API calls: 1
+$ time keywords test-sample.txt
+keywords: ◉ Reading from 'test-sample.txt'
+keywords: ◉ Calling Anthropic API 'claude-haiku-4-5' ...
+keywords: ✓ Result cached
+keywords: ✓ Extraction complete
+keywords: ◉ API calls: 1
 
 real    0m2.341s
 ```
@@ -321,11 +352,11 @@ real    0m2.341s
 ### Second run (cached)
 
 ```bash
-$ time extract-keywords test-sample.txt
-extract-keywords: ◉ Reading from 'test-sample.txt'
-extract-keywords: ✓ Cache hit
-extract-keywords: ✓ Extraction complete
-extract-keywords: ◉ Cache hits: 1
+$ time keywords test-sample.txt
+keywords: ◉ Reading from 'test-sample.txt'
+keywords: ✓ Cache hit
+keywords: ✓ Extraction complete
+keywords: ◉ Cache hits: 1
 
 real    0m0.042s
 ```
@@ -334,7 +365,7 @@ real    0m0.042s
 
 ```bash
 # Clear all cached results
-$ rm -rf ~/.cache/extract-keywords/
+$ rm -rf ~/.cache/keywords/
 
 # Or clear cache for specific directory
 $ rm -rf /custom/cache/dir/
@@ -346,23 +377,23 @@ $ rm -rf /custom/cache/dir/
 
 ```bash
 $ unset ANTHROPIC_API_KEY
-$ extract-keywords test.txt
-extract-keywords: ✗ ANTHROPIC_API_KEY environment variable not set
+$ keywords test.txt
+keywords: ✗ ANTHROPIC_API_KEY environment variable not set
 ```
 
 ### File not found
 
 ```bash
-$ extract-keywords nonexistent.txt
-extract-keywords: ✗ File not found: nonexistent.txt
+$ keywords nonexistent.txt
+keywords: ✗ File not found: nonexistent.txt
 ```
 
 ### Input too short
 
 ```bash
-$ echo "short" | extract-keywords
-extract-keywords: ◉ Reading from stdin
-extract-keywords: ✗ Input too short (minimum 50 characters)
+$ echo "short" | keywords
+keywords: ◉ Reading from stdin
+keywords: ✗ Input too short (minimum 50 characters)
 ```
 
 ## Performance Considerations
@@ -372,33 +403,34 @@ extract-keywords: ✗ Input too short (minimum 50 characters)
 The script handles input up to 200,000 characters. Larger inputs will trigger a warning:
 
 ```bash
-$ extract-keywords very-large-file.txt
-extract-keywords: ◉ Reading from 'very-large-file.txt'
-extract-keywords: ▲ Large input (250000 chars) may be slow
+$ keywords very-large-file.txt
+keywords: ◉ Reading from 'very-large-file.txt'
+keywords: ▲ Large input (250000 chars) may be slow
 ```
 
 For very large documents, consider:
 - Breaking into chunks
 - Extracting keywords from sections separately
 - Using summary/abstract only
+- Using `-S` to remove stopwords and reduce input size
 
 ## Testing
 
 ### Dry-run mode (no API calls)
 
 ```bash
-$ extract-keywords --dry-run test-sample.txt
-extract-keywords: ◉ Reading from 'test-sample.txt'
-extract-keywords: ◉ DRY-RUN: Would call API with 1234 characters
+$ keywords --dry-run test-sample.txt
+keywords: ◉ Reading from 'test-sample.txt'
+keywords: ◉ DRY-RUN: Would call API with 1234 characters
 dry-run
 
-extract-keywords: ✓ Extraction complete
+keywords: ✓ Extraction complete
 ```
 
 ### Quiet mode (no progress messages)
 
 ```bash
-$ extract-keywords --quiet test-sample.txt
+$ keywords --quiet test-sample.txt
 retrieval-augmented generation
 RAG systems
 Claude API
@@ -407,27 +439,30 @@ Claude API
 ### Verbose mode (detailed output)
 
 ```bash
-$ extract-keywords --verbose test-sample.txt
-extract-keywords: ◉ Reading from 'test-sample.txt'
-extract-keywords: ◉ Calling Anthropic API 'claude-haiku-4-5' ...
-extract-keywords: ✓ Result cached
+$ keywords --verbose test-sample.txt
+keywords: ◉ Reading from 'test-sample.txt'
+keywords: ◉ Calling Anthropic API 'claude-haiku-4-5' ...
+keywords: ✓ Result cached
 
 retrieval-augmented generation
 RAG systems
 Claude API
 
-extract-keywords: ✓ Extraction complete
-extract-keywords: ◉ API calls: 1
+keywords: ✓ Extraction complete
+keywords: ◉ API calls: 1
 ```
 
 ### Combined short options with verbose
 
 ```bash
 # Extract with scores, types, and verbose output (bundled)
-$ extract-keywords -stv test-sample.txt
+$ keywords -stv test-sample.txt
+
+# With stopwords, scores, and types (note: -S uppercase)
+$ keywords -Sst test-sample.txt
 
 # Quiet mode with JSON output
-$ extract-keywords -qf json test-sample.txt
+$ keywords -qf json test-sample.txt
 ```
 
 ## Cost Optimization
@@ -450,7 +485,7 @@ Haiku is 20x cheaper than Opus and 5x cheaper than Sonnet, with excellent qualit
 ```bash
 # Process documents, leveraging cache for duplicates
 for doc in documents/*.txt; do
-  extract-keywords "$doc" > "keywords/$(basename "$doc")"
+  keywords "$doc" > "keywords/$(basename "$doc")"
 done
 ```
 
@@ -461,7 +496,7 @@ done
 # Enhance CustomKB queries with keyword extraction
 
 query="$1"
-keywords=$(echo "$query" | extract-keywords --max-keywords 5)
+keywords=$(echo "$query" | keywords --max-keywords 5)
 
 # Use keywords for hybrid search in CustomKB
 # python3 query_manager.py --query "$query" --keywords "$keywords"
@@ -471,8 +506,56 @@ keywords=$(echo "$query" | extract-keywords --max-keywords 5)
 
 ```bash
 # Count total unique keywords from multiple documents
-extract-keywords docs/*.txt | sort -u | wc -l
+keywords docs/*.txt | sort -u | wc -l
 
 # Find most common keywords
-extract-keywords docs/*.txt | sort | uniq -c | sort -rn | head -10
+keywords docs/*.txt | sort | uniq -c | sort -rn | head -10
 ```
+
+## Stopwords Examples
+
+### Basic stopword removal
+
+```bash
+# Sample text with stopwords
+$ echo "The quick brown fox jumps over the lazy dog" | keywords
+
+# With stopwords removed (removes: the, over)
+$ echo "The quick brown fox jumps over the lazy dog" | keywords -S
+```
+
+### Stopwords in batch processing
+
+```bash
+# Process documents with stopword removal for cost savings
+for doc in corpus/*.txt; do
+  keywords -S "$doc" > "keywords/$(basename "$doc")"
+done
+```
+
+### Stopwords with RAG systems
+
+```bash
+# Extract cleaner keywords for semantic search
+keywords -Sfse json document.txt
+
+# This combines:
+# -S: Remove stopwords
+# -f json: JSON output format
+# -s: Include scores
+# -e: Extract named entities
+```
+
+### When to use stopwords
+
+**Use `-S` when:**
+- Processing long documents (reduces costs)
+- Extracting for search queries (removes noise)
+- Working with verbose text (articles, reports)
+- Cost optimization is important
+
+**Skip `-S` when:**
+- Processing technical documentation (preserves structure)
+- Short input text (minimal benefit)
+- Stopwords may be meaningful in context
+- You need to preserve exact phrasing

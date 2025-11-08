@@ -1,4 +1,4 @@
-# extract-keywords
+# keywords
 
 Extract keywords and keyphrases from text using Anthropic Claude API. Optimized for web search queries and RAG (Retrieval-Augmented Generation) systems.
 
@@ -8,6 +8,7 @@ Extract keywords and keyphrases from text using Anthropic Claude API. Optimized 
 - **Multiple Models**: Support for Claude Haiku, Sonnet, and Opus
 - **Smart Caching**: 24-hour result cache to minimize API calls (SHA256-keyed)
 - **Flexible Output**: Text (default), JSON, or CSV formats
+- **Stopwords Filtering**: Optional removal of common words before extraction
 - **Short Option Bundling**: Combine flags like `-stv` for convenience
 - **BCS Compliant**: Follows [BASH-CODING-STANDARD](https://github.com/Open-Technology-Foundation/bash-coding-standard)
 - **Production Ready**: Error handling, validation, shell-safe quoting, and verbose logging
@@ -17,18 +18,22 @@ Extract keywords and keyphrases from text using Anthropic Claude API. Optimized 
 
 ```bash
 # Make executable
-chmod +x extract-keywords
+chmod +x keywords
 
 # Add to PATH (optional)
-sudo ln -s "$(pwd)/extract-keywords" /usr/local/bin/
+sudo ln -s "$(pwd)/keywords" /usr/local/bin/
 ```
 
 ## Requirements
 
+**Required:**
 - bash 5.2+
 - curl (for API calls)
 - jq (for JSON processing)
 - Anthropic API key
+
+**Optional:**
+- [stopwords](https://github.com/Open-Technology-Foundation/stopwords.bash) (for `-S, --stopwords` option)
 
 ## Setup
 
@@ -47,49 +52,52 @@ echo 'export ANTHROPIC_API_KEY="your-api-key-here"' >> ~/.bashrc
 
 ```bash
 # Check version
-extract-keywords --version
+keywords --version
 
 # Extract keywords from file (text output)
-extract-keywords document.txt
+keywords document.txt
 
 # From stdin
-cat document.txt | extract-keywords
-echo "Your text here" | extract-keywords
+cat document.txt | keywords
+echo "Your text here" | keywords
 
 # With scores (using short option)
-extract-keywords -s document.txt
+keywords -s document.txt
 
 # JSON output with entity extraction (bundled options)
-extract-keywords -fes json document.txt
+keywords -fes json document.txt
 # or long form:
-extract-keywords --format json --entities --scores document.txt
+keywords --format json --entities --scores document.txt
 ```
 
 ### Advanced Examples
 
 ```bash
 # Use Sonnet model for better accuracy
-extract-keywords --model sonnet-4-5 document.txt
+keywords --model sonnet-4-5 document.txt
 # or short form:
-extract-keywords -m sonnet document.txt
+keywords -m sonnet document.txt
 
 # CSV output with scores and types (bundled)
-extract-keywords -fst csv document.txt
+keywords -fst csv document.txt
 # or long form:
-extract-keywords --format csv --scores --types document.txt
+keywords --format csv --scores --types document.txt
 
 # Extract more keywords with verbose output
-extract-keywords -vn 20 document.txt
+keywords -vn 30 document.txt
 
 # Filter by minimum score with bundled options
-extract-keywords -st --min-score 0.7 document.txt
+keywords -st --min-score 0.7 document.txt
+
+# Remove stopwords before extraction (requires stopwords)
+keywords -S document.txt
 
 # Disable caching for fresh results
-extract-keywords --no-cache document.txt
+keywords --no-cache document.txt
 
 # Batch processing with quiet mode
 for file in docs/*.txt; do
-  extract-keywords -q "$file" > "keywords/$(basename "${file%.txt}").txt"
+  keywords -q "$file" > "keywords/$(basename "${file%.txt}").txt"
 done
 ```
 
@@ -106,7 +114,7 @@ OPTIONS:
                             haiku-4-5  (default, fast & cost-effective)
                             sonnet-4-5 (advanced, better accuracy)
                             opus-4-5   (premium, best quality)
-  -n, --max-keywords N    Maximum keywords to extract (default: 10)
+  -n, --max-keywords N    Maximum keywords to extract (default: 20)
   -f, --format FORMAT     Output format:
                             text  (default, one per line)
                             json  (structured with metadata)
@@ -115,15 +123,17 @@ OPTIONS:
   -t, --types             Include keyword types
   -e, --entities          Extract named entities separately
   --min-score FLOAT       Minimum relevance score filter (default: 0.0)
+  -S, --stopwords         Remove stopwords from input (requires stopwords)
   --no-cache              Disable result caching
-  --cache-dir DIR         Cache directory (default: ~/.cache/extract-keywords)
+  --cache-dir DIR         Cache directory (default: ~/.cache/keywords)
   -v, --verbose           Verbose output
   -q, --quiet             Quiet mode
   --dry-run               Test mode without API calls
 
 SHORT OPTIONS:
-  Options can be bundled: -stv instead of -s -t -v
+  Options can be bundled: -stSv instead of -s -t -S -v
   Options requiring values must come last in bundle
+  Note: -S (uppercase) is for stopwords, -s (lowercase) is for scores
 ```
 
 ## Output Formats
@@ -225,19 +235,43 @@ You can also specify full model IDs with version dates:
 
 ```bash
 export ANTHROPIC_MODEL='claude-haiku-4-5-20250929'
-extract-keywords document.txt
+keywords document.txt
 ```
+
+## Stopwords Filtering
+
+The `-S, --stopwords` option removes common words (articles, prepositions, conjunctions) from the input text before sending to the API. This can:
+
+- **Reduce noise**: Focus extraction on meaningful content words
+- **Lower costs**: Shorter input text means lower API costs
+- **Improve relevance**: Remove filler words that don't add semantic value
+
+**Requirements:**
+- Install [stopwords.bash](https://github.com/Open-Technology-Foundation/stopwords.bash)
+- Ensure `stopwords` command is in your PATH
+
+**Example:**
+```bash
+# Without stopwords
+echo "The quick brown fox jumps over the lazy dog" | keywords
+
+# With stopwords (removes: the, over, the)
+echo "The quick brown fox jumps over the lazy dog" | keywords -S
+```
+
+**How it works:**
+The script calls `stopwords -p` to process the input text, which removes common stopwords while preserving the remaining text structure.
 
 ## Caching
 
 Results are cached for 24 hours by default to minimize API costs:
 
-- **Cache location**: `~/.cache/extract-keywords/` (XDG_CACHE_HOME compliant)
+- **Cache location**: `~/.cache/keywords/` (XDG_CACHE_HOME compliant)
 - **Cache key**: SHA256 hash of (input text + model + max_keywords + entities flag + min_score)
 - **TTL**: 24 hours (stale cache automatically deleted)
 - **Disable**: Use `--no-cache` flag
 - **Custom location**: Use `--cache-dir /path/to/cache`
-- **Clear cache**: `rm -rf ~/.cache/extract-keywords/`
+- **Clear cache**: `rm -rf ~/.cache/keywords/`
 
 The cache is smart - changing any parameter (model, max keywords, filters) creates a new cache entry.
 
@@ -248,7 +282,10 @@ The cache is smart - changing any parameter (model, max keywords, filters) creat
 Extract search terms from long documents:
 
 ```bash
-extract-keywords --max-keywords 5 article.txt
+keywords --max-keywords 5 article.txt
+
+# With stopword removal for cleaner results
+keywords -S --max-keywords 5 article.txt
 ```
 
 ### RAG System Integration
@@ -256,7 +293,10 @@ extract-keywords --max-keywords 5 article.txt
 Generate retrieval keywords with scores:
 
 ```bash
-extract-keywords --format json --scores --entities document.txt
+keywords --format json --scores --entities document.txt
+
+# With stopwords removed for better semantic focus
+keywords -Sfse json document.txt
 ```
 
 ### Document Indexing
@@ -265,7 +305,7 @@ Batch extract keywords for search indexing:
 
 ```bash
 for doc in corpus/*.txt; do
-  keywords=$(extract-keywords --max-keywords 15 "$doc")
+  keywords=$(keywords --max-keywords 15 "$doc")
   # Index keywords in your search system
 done
 ```
@@ -275,7 +315,7 @@ done
 Analyze document themes and topics:
 
 ```bash
-extract-keywords --format csv --types --scores report.txt
+keywords --format csv --types --scores report.txt
 ```
 
 ## Performance
@@ -317,11 +357,11 @@ The script handles common errors gracefully:
 
 ```bash
 # Extract only high-confidence keywords
-extract-keywords -f json -s doc.txt | \
+keywords -f json -s doc.txt | \
   jq '.keywords[] | select(.score > 0.8) | .term'
 
 # Count keywords by type
-extract-keywords -f json -t doc.txt | \
+keywords -f json -t doc.txt | \
   jq '[.keywords[].type] | group_by(.) | map({type: .[0], count: length})'
 ```
 
@@ -329,12 +369,12 @@ extract-keywords -f json -t doc.txt | \
 
 ```bash
 # Extract keywords from command output
-man bash | extract-keywords --max-keywords 8
+man bash | keywords --max-keywords 8
 
 # Combine with other tools
 curl -s https://example.com/article | \
   html2text | \
-  extract-keywords --format csv --scores
+  keywords --format csv --scores
 ```
 
 ## Troubleshooting
@@ -375,6 +415,18 @@ Warning for inputs > 200,000 characters. Consider:
 - Extracting from document summary
 - Processing in chunks
 - Using shorter excerpts
+- Using `-S` to remove stopwords and reduce input size
+
+### "stopwords not found"
+
+The `-S, --stopwords` option requires the `stopwords` command. Install it:
+
+```bash
+# Clone and install stopwords.bash
+git clone https://github.com/Open-Technology-Foundation/stopwords.bash
+cd stopwords.bash
+sudo make install
+```
 
 ## Development
 
@@ -382,19 +434,19 @@ Warning for inputs > 200,000 characters. Consider:
 
 ```bash
 # Check version
-extract-keywords --version
+keywords --version
 
 # Test with dry-run mode
-extract-keywords --dry-run test-sample.txt
+keywords --dry-run test-sample.txt
 
 # Test with verbose output and bundled options
-extract-keywords -vfes json test-sample.txt
+keywords -vfes json test-sample.txt
 
-# Test short option bundling
-extract-keywords -stv test-sample.txt
+# Test short option bundling (including stopwords)
+keywords -stSv test-sample.txt
 
 # shellcheck validation
-shellcheck extract-keywords
+shellcheck keywords
 ```
 
 ### Sample Files
@@ -419,16 +471,7 @@ Key standards:
 
 ## License
 
-This project is part of the Okusi Group scripts collection.
-
-## Author
-
-**Gary Dean** (Biksu Okusi)
-Okusi Group, Bali, Indonesia
-
-## Version
-
-1.0.0
+GPL-3
 
 ## See Also
 
