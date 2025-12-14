@@ -7,6 +7,7 @@ shopt -s inherit_errexit nullglob extglob
 
 # Script metadata
 declare -r VERSION='1.0.0'
+#shellcheck disable=SC2155
 declare -r SCRIPT_PATH=$(realpath -- "${BASH_SOURCE[0]}")
 declare -r SCRIPT_NAME=${SCRIPT_PATH##*/}
 
@@ -270,6 +271,7 @@ parse_json_result() {
 
   # Try extracting JSON from markdown code blocks
   local -- extracted
+  #shellcheck disable=SC2016
   extracted=$(sed -n '/^```json$/,/^```$/p' <<< "$json_text" | sed '1d;$d')
   if [[ -n "$extracted" ]] && jq -e '.keywords' <<< "$extracted" >/dev/null 2>&1; then
     printf '%s' "$extracted"
@@ -358,7 +360,7 @@ extract_keywords() {
   [[ -n "$input_text" ]] || { error 'Empty input text'; return 1; }
 
   local -i text_length=${#input_text}
-  ((text_length > 50)) || { error 'Input too short (minimum 50 characters)'; return 1; }
+  ((text_length > 30)) || { error 'Input too short (minimum 30 characters)'; return 1; }
   ((text_length < 200000)) || warn "Large input (${text_length} chars) may be slow"
 
   # Check cache
