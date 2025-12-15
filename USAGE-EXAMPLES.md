@@ -393,7 +393,7 @@ keywords: ✗ File not found: nonexistent.txt
 ```bash
 $ echo "short" | keywords
 keywords: ◉ Reading from stdin
-keywords: ✗ Input too short (minimum 50 characters)
+keywords: ✗ Input too short (minimum 30 characters)
 ```
 
 ## Performance Considerations

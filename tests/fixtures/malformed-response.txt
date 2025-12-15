@@ -1,0 +1,3 @@
+This is not valid JSON at all.
+It's just plain text that should fail parsing.
+The script should handle this gracefully.
