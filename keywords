@@ -3,7 +3,7 @@
 # Optimized for web search and RAG retrieval systems
 
 set -euo pipefail
-shopt -s inherit_errexit nullglob extglob
+shopt -s inherit_errexit shift_verbose nullglob extglob
 
 # Check required dependencies early (before functions defined)
 for cmd in curl jq; do
@@ -272,7 +272,7 @@ call_anthropic_api() {
   }
 
   printf '%s' "$content"
-  ((API_CALLS+=1))
+  API_CALLS+=1
 }
 
 # Parse and validate JSON result
@@ -333,16 +333,16 @@ format_as_csv() {
   local -- json=$1
 
   if ((INCLUDE_SCORES)) && ((INCLUDE_TYPES)); then
-    echo "term,score,type"
+    >&2 echo "term,score,type"
     jq -r '.keywords[] | [.term, .score, .type] | @csv' <<< "$json"
   elif ((INCLUDE_SCORES)); then
-    echo "term,score"
+    >&2 echo "term,score"
     jq -r '.keywords[] | [.term, .score] | @csv' <<< "$json"
   elif ((INCLUDE_TYPES)); then
-    echo "term,type"
+    >&2 echo "term,type"
     jq -r '.keywords[] | [.term, .type] | @csv' <<< "$json"
   else
-    echo "term"
+    >&2 echo "term"
     jq -r '.keywords[].term' <<< "$json"
   fi
 }
