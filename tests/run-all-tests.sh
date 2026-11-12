@@ -8,8 +8,7 @@ shopt -s inherit_errexit shift_verbose extglob nullglob
 # Script metadata
 SCRIPT_PATH=$(realpath -- "${BASH_SOURCE[0]}")
 SCRIPT_DIR=${SCRIPT_PATH%/*}
-SCRIPT_NAME=${SCRIPT_PATH##*/}
-readonly -- SCRIPT_PATH SCRIPT_DIR SCRIPT_NAME
+readonly -- SCRIPT_PATH SCRIPT_DIR
 
 # Keywords script location
 KEYWORDS_SCRIPT="$SCRIPT_DIR/../keywords"

@@ -13,7 +13,6 @@ source "$SCRIPT_DIR"/test-helpers.sh
 
 # Keywords script
 KEYWORDS="${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}"
-FIXTURES="${FIXTURES_DIR:-$SCRIPT_DIR/fixtures}"
 
 # Test environment
 setup_test_env() {
@@ -79,25 +78,34 @@ test_csv_format() {
   setup_test_env
   local -- output exit_code
 
-  # CSV format (should have header)
+  # CSV format: header goes to stderr (appended batches get no repeated header).
+  # The stderr captures end in ||: because the exit status was already asserted above
   output=$(echo "$TEST_INPUT" | "$KEYWORDS" --dry-run -f csv 2>/dev/null) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" "CSV format succeeds"
-  assert_contains "$output" "term" "CSV has term header"
+  assert_not_contains "$output" "term" "CSV rows on stdout carry no header"
+  output=$(echo "$TEST_INPUT" | "$KEYWORDS" --dry-run -f csv 2>&1 >/dev/null) ||:
+  assert_contains "$output" "term" "CSV has term header on stderr"
 
   # CSV with scores (-s)
   output=$(echo "$TEST_INPUT" | "$KEYWORDS" --dry-run -f csv -s 2>/dev/null) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" "CSV with scores succeeds"
-  assert_contains "$output" "term,score" "CSV has score header"
+  assert_not_contains "$output" "term,score" "CSV -s rows on stdout carry no header"
+  output=$(echo "$TEST_INPUT" | "$KEYWORDS" --dry-run -f csv -s 2>&1 >/dev/null) ||:
+  assert_contains "$output" "term,score" "CSV has score header on stderr"
 
   # CSV with types (-t)
   output=$(echo "$TEST_INPUT" | "$KEYWORDS" --dry-run -f csv -t 2>/dev/null) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" "CSV with types succeeds"
-  assert_contains "$output" "term,type" "CSV has type header"
+  assert_not_contains "$output" "term,type" "CSV -t rows on stdout carry no header"
+  output=$(echo "$TEST_INPUT" | "$KEYWORDS" --dry-run -f csv -t 2>&1 >/dev/null) ||:
+  assert_contains "$output" "term,type" "CSV has type header on stderr"
 
   # CSV with both (-st)
   output=$(echo "$TEST_INPUT" | "$KEYWORDS" --dry-run -f csv -st 2>/dev/null) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" "CSV with scores and types succeeds"
-  assert_contains "$output" "term,score,type" "CSV has all headers"
+  assert_not_contains "$output" "term,score,type" "CSV -st rows on stdout carry no header"
+  output=$(echo "$TEST_INPUT" | "$KEYWORDS" --dry-run -f csv -st 2>&1 >/dev/null) ||:
+  assert_contains "$output" "term,score,type" "CSV has all headers on stderr"
 
   cleanup_test_env
 }

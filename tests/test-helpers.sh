@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Test helper functions for bash-coding-standard test suite
+# Test helper functions for the keywords test suite
+#
+# Asserts record a failure and still return 0, so a suite under set -e runs every
+# assertion instead of stopping at the first failure; print_summary sets the exit status.
 
 # Test counters
 declare -gi TESTS_RUN=0 TESTS_PASSED=0 TESTS_FAILED=0
@@ -30,7 +33,7 @@ assert_equals() {
     echo "${RED}✗${NC} $test_name"
     echo "  Expected: '$expected'"
     echo "  Actual:   '$actual'"
-    return 1
+    return 0
   fi
 }
 
@@ -51,7 +54,7 @@ assert_contains() {
     echo "${RED}✗${NC} $test_name"
     echo "  Expected to contain: '$needle'"
     echo "  Actual output: '$haystack'"
-    return 1
+    return 0
   fi
 }
 
@@ -72,7 +75,7 @@ assert_not_contains() {
     echo "${RED}✗${NC} $test_name"
     echo "  Expected NOT to contain: '$needle'"
     echo "  Actual output: '$haystack'"
-    return 1
+    return 0
   fi
 }
 
@@ -93,7 +96,7 @@ assert_exit_code() {
     echo "${RED}✗${NC} $test_name"
     echo "  Expected exit code: $expected"
     echo "  Actual exit code: $actual"
-    return 1
+    return 0
   fi
 }
 
@@ -112,7 +115,7 @@ assert_file_exists() {
     FAILED_TESTS+=("$test_name")
     echo "${RED}✗${NC} $test_name"
     echo "  File not found: $file"
-    return 1
+    return 0
   fi
 }
 
@@ -131,7 +134,7 @@ assert_success() {
     FAILED_TESTS+=("$test_name")
     echo "${RED}✗${NC} $test_name"
     echo "  Expected success (0), got exit code: $exit_code"
-    return 1
+    return 0
   fi
 }
 
@@ -150,7 +153,7 @@ assert_failure() {
     FAILED_TESTS+=("$test_name")
     echo "${RED}✗${NC} $test_name"
     echo "  Expected failure (non-zero), got exit code: 0"
-    return 1
+    return 0
   fi
 }
 
@@ -177,7 +180,7 @@ fail() {
   TESTS_FAILED+=1
   FAILED_TESTS+=("$message")
   echo "${RED}✗${NC} $message"
-  return 1
+  return 0
 }
 
 # Convenience aliases for assert_exit_code
@@ -200,7 +203,7 @@ assert_not_zero() {
     FAILED_TESTS+=("$test_name")
     echo "${RED}✗${NC} $test_name"
     echo "  Expected non-zero exit code, got: 0"
-    return 1
+    return 0
   fi
 }
 
@@ -220,7 +223,7 @@ assert_not_empty() {
     FAILED_TESTS+=("$test_name")
     echo "${RED}✗${NC} $test_name"
     echo "  Expected non-empty value"
-    return 1
+    return 0
   fi
 }
 
@@ -275,7 +278,7 @@ assert_file_contains() {
     FAILED_TESTS+=("$test_name")
     echo "${RED}✗${NC} $test_name"
     echo "  File not found: $file"
-    return 1
+    return 0
   fi
 
   if grep -qF "$text" "$file"; then
@@ -287,7 +290,7 @@ assert_file_contains() {
     FAILED_TESTS+=("$test_name")
     echo "${RED}✗${NC} $test_name"
     echo "  File does not contain: $text"
-    return 1
+    return 0
   fi
 }
 
@@ -309,7 +312,7 @@ assert_regex_match() {
     echo "${RED}✗${NC} $test_name"
     echo "  Pattern: $pattern"
     echo "  Text: $text"
-    return 1
+    return 0
   fi
 }
 
@@ -335,7 +338,7 @@ assert_lines_between() {
     echo "${RED}✗${NC} $test_name"
     echo "  Expected: $min-$max lines"
     echo "  Actual: $actual_lines lines"
-    return 1
+    return 0
   fi
 }
 
@@ -356,7 +359,8 @@ setup_test_env() {
   local -- temp_dir
   temp_dir=$(mktemp -d "/tmp/bcs-test-${test_name}-XXXXXX")
 
-  # Set cleanup trap
+  # Expand now: temp_dir is local and no longer set when the trap fires
+  #shellcheck disable=SC2064
   trap "rm -rf '$temp_dir'" RETURN EXIT
 
   echo "$temp_dir"
@@ -455,7 +459,7 @@ assert_dir_exists() {
     FAILED_TESTS+=("$test_name")
     echo "${RED}✗${NC} $test_name"
     echo "  Directory not found: $dir"
-    return 1
+    return 0
   fi
 }
 
@@ -475,7 +479,7 @@ assert_file_executable() {
     FAILED_TESTS+=("$test_name")
     echo "${RED}✗${NC} $test_name"
     echo "  File is not executable: $file"
-    return 1
+    return 0
   fi
 }
 
@@ -497,7 +501,7 @@ assert_greater_than() {
     echo "${RED}✗${NC} $test_name"
     echo "  Expected: > $threshold"
     echo "  Actual: $actual"
-    return 1
+    return 0
   fi
 }
 
@@ -519,7 +523,7 @@ assert_less_than() {
     echo "${RED}✗${NC} $test_name"
     echo "  Expected: < $threshold"
     echo "  Actual: $actual"
-    return 1
+    return 0
   fi
 }
 

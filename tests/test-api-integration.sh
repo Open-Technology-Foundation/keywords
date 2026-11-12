@@ -25,7 +25,9 @@ declare -- MOCK_DIR=""
 
 setup_test_env() {
   TEST_DIR=$(mktemp -d)
-  MOCK_DIR="$TEST_DIR/mocks"
+  # The script locks PATH to ~/.local/bin:/usr/local/bin:/usr/bin:/bin, so mocks
+  # live in the test HOME's ~/.local/bin rather than in a directory added to PATH
+  MOCK_DIR="$TEST_DIR/home/.local/bin"
   export HOME="$TEST_DIR/home"
   export XDG_CACHE_HOME="$TEST_DIR/cache"
   mkdir -p "$HOME" "$XDG_CACHE_HOME" "$MOCK_DIR"
@@ -164,6 +166,305 @@ test_mocked_markdown_response() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# REQUEST AND RESPONSE SHAPE (Claude 5.5 models)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+declare -r KEYWORDS_JSON='{"keywords":[{"term":"vector search","score":0.9,"type":"technical"}]}'
+
+# Mock curl that returns $TEST_DIR/response.json and records what it was given:
+# its argv, the request body, and any header file passed as -H @FILE
+mock_curl_recording() {
+  cat > "$MOCK_DIR"/curl << 'MOCK_SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$KEYWORDS_MOCK_ARGV"
+: > "$KEYWORDS_MOCK_HEADERS"
+while (($#)); do
+  case $1 in
+    -d) printf '%s' "$2" > "$KEYWORDS_MOCK_BODY" ;;
+    --data-binary) [[ $2 == @- ]] && cat > "$KEYWORDS_MOCK_BODY" || printf '%s' "$2" > "$KEYWORDS_MOCK_BODY" ;;
+    -H) [[ $2 != @* ]] || cat "${2:1}" >> "$KEYWORDS_MOCK_HEADERS" ;;
+  esac
+  shift
+done
+cat "$KEYWORDS_MOCK_FIXTURE"
+MOCK_SCRIPT
+
+  chmod +x "$MOCK_DIR"/curl
+  export KEYWORDS_MOCK_FIXTURE="$TEST_DIR"/response.json
+  export KEYWORDS_MOCK_BODY="$TEST_DIR"/request-body.json
+  export KEYWORDS_MOCK_ARGV="$TEST_DIR"/argv.txt
+  export KEYWORDS_MOCK_HEADERS="$TEST_DIR"/headers.txt
+  export KEYWORDS_MOCK_EXIT=0
+  export PATH="$MOCK_DIR:$ORIGINAL_PATH"
+  export ANTHROPIC_API_KEY=test-mock-key
+}
+
+# write_response CONTENT_BLOCKS_JSON [STOP_REASON]
+write_response() {
+  jq -n --argjson content "$1" --arg stop_reason "${2:-end_turn}" \
+    '{type: "message", role: "assistant", content: $content, stop_reason: $stop_reason}' \
+    > "$TEST_DIR"/response.json
+}
+
+text_block() { jq -n --arg text "$1" '{type: "text", text: $text}'; }
+
+test_thinking_block_before_text() {
+  test_section 'Response Starting With a Thinking Block'
+
+  setup_test_env
+  local -- output exit_code
+  mock_curl_recording
+  write_response "[{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"sig\"},$(text_block "$KEYWORDS_JSON")]"
+
+  output=$(echo 'Test input for a thinking-first response' | "$KEYWORDS" --no-cache 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" 'Thinking-first response succeeds'
+  assert_contains "$output" 'vector search' 'Keywords read from the text block'
+
+  unmock_curl
+  cleanup_test_env
+}
+
+test_refusal_reported() {
+  test_section 'Refused Request'
+
+  setup_test_env
+  local -- output exit_code
+  mock_curl_recording
+  write_response '[]' refusal
+
+  output=$(echo 'Input text for a declined request' | "$KEYWORDS" --no-cache 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 1 "$exit_code" 'Refusal exits 1'
+  assert_contains "$output" 'declined' 'Refusal is named in the error'
+
+  unmock_curl
+  cleanup_test_env
+}
+
+test_truncated_response_reported() {
+  test_section 'Truncated Response'
+
+  setup_test_env
+  local -- output exit_code
+  mock_curl_recording
+  write_response "[$(text_block '{"keywords":[{"term":"vector sea')]" max_tokens
+
+  output=$(echo 'Input text for a truncated response' | "$KEYWORDS" --no-cache 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 1 "$exit_code" 'Truncated response exits 1'
+  assert_contains "$output" 'max-tokens' 'Error points at --max-tokens'
+
+  unmock_curl
+  cleanup_test_env
+}
+
+test_request_body_defaults() {
+  test_section 'Request Body Defaults'
+
+  setup_test_env
+  mock_curl_recording
+  write_response "[$(text_block "$KEYWORDS_JSON")]"
+
+  echo 'Test input for inspecting the default request body' | "$KEYWORDS" --no-cache &>/dev/null ||:
+  assert_equals false "$(jq -r 'has("temperature")' "$KEYWORDS_MOCK_BODY")" 'temperature is not sent by default'
+  assert_equals 8000 "$(jq -r '.max_tokens' "$KEYWORDS_MOCK_BODY")" 'Default max_tokens leaves room for thinking'
+  assert_contains "$(< "$KEYWORDS_MOCK_ARGV")" '--retry' 'Transient failures are retried'
+
+  unmock_curl
+  cleanup_test_env
+}
+
+test_api_key_not_on_command_line() {
+  test_section 'API Key Kept Off the Command Line'
+
+  setup_test_env
+  mock_curl_recording
+  write_response "[$(text_block "$KEYWORDS_JSON")]"
+
+  echo 'Input text for inspecting how the key is passed' | "$KEYWORDS" --no-cache &>/dev/null ||:
+  assert_not_contains "$(< "$KEYWORDS_MOCK_ARGV")" 'test-mock-key' 'API key absent from curl argv'
+  assert_not_contains "$(< "$KEYWORDS_MOCK_ARGV")" 'how the key is passed' 'Document text absent from curl argv'
+  assert_contains "$(< "$KEYWORDS_MOCK_HEADERS")" 'x-api-key: test-mock-key' 'API key delivered through a header file'
+
+  unmock_curl
+  cleanup_test_env
+}
+
+# Fails on any input over Linux's 131,072-byte limit for a single argument
+test_large_input() {
+  test_section 'Input Larger Than One Argument'
+
+  setup_test_env
+  local -- output exit_code input
+  mock_curl_recording
+  write_response "[$(text_block "$KEYWORDS_JSON")]"
+  # 21 bytes x 8000 = 168,000 bytes, over the 131,072-byte limit
+  input=$(printf 'vector search scales %.0s' {1..8000})
+
+  output=$("$KEYWORDS" --no-cache <<< "$input" 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" '168 KB input succeeds'
+  assert_greater_than "$(jq -r '.messages[0].content | length' "$KEYWORDS_MOCK_BODY" 2>/dev/null)" 167999 \
+    'Whole document reaches the request body'
+
+  if command -v stopwords &>/dev/null; then
+    output=$("$KEYWORDS" --no-cache -S <<< "$input" 2>&1) && exit_code=0 || exit_code=$?
+    assert_exit_code 0 "$exit_code" '168 KB input succeeds with -S'
+  else
+    skip_test 'stopwords not installed'
+  fi
+
+  unmock_curl
+  cleanup_test_env
+}
+
+test_csv_quoting() {
+  test_section 'CSV Quoting'
+
+  setup_test_env
+  local -- output
+  mock_curl_recording
+  write_response "[$(text_block '{"keywords":[{"term":"Jakarta, Indonesia","score":0.9,"type":"entity"}]}')]"
+
+  output=$("$KEYWORDS" --no-cache -f csv <<< 'Input text for checking CSV quoting' 2>/dev/null) ||:
+  assert_equals '"Jakarta, Indonesia"' "$output" 'Plain CSV quotes a term containing a comma'
+
+  unmock_curl
+  cleanup_test_env
+}
+
+test_statistics_counters() {
+  test_section 'Statistics Counters'
+
+  setup_test_env
+  local -- output
+  mock_curl_recording
+  write_response "[$(text_block "$KEYWORDS_JSON")]"
+
+  output=$("$KEYWORDS" -f json <<< 'Input text for counting calls and hits' 2>/dev/null) ||:
+  assert_equals 1 "$(jq -r '.metadata.api_calls' <<< "$output")" 'api_calls counts the request'
+  output=$("$KEYWORDS" -f json <<< 'Input text for counting calls and hits' 2>/dev/null) ||:
+  assert_equals 1 "$(jq -r '.metadata.cache_hits' <<< "$output")" 'cache_hits counts the cache hit'
+  assert_equals 0 "$(jq -r '.metadata.api_calls' <<< "$output")" 'No API call on a cache hit'
+
+  unmock_curl
+  cleanup_test_env
+}
+
+test_cache_write_failure() {
+  test_section 'Cache Write Failure'
+
+  setup_test_env
+  local -- output exit_code
+  mock_curl_recording
+  write_response "[$(text_block "$KEYWORDS_JSON")]"
+  : > "$TEST_DIR"/not-a-dir
+
+  output=$("$KEYWORDS" --cache-dir "$TEST_DIR"/not-a-dir/cache <<< 'Input text for an unwritable cache' 2>&1) \
+    && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" 'Keywords still delivered when the cache cannot be written'
+  assert_contains "$output" 'vector search' 'Keywords printed'
+  assert_contains "$output" 'Could not write cache' 'Cache failure reported'
+  assert_not_contains "$output" 'Result cached' 'No false success message'
+
+  unmock_curl
+  cleanup_test_env
+}
+
+test_cache_reuse_and_pruning() {
+  test_section 'Cache Reuse and Pruning'
+
+  setup_test_env
+  local -- output
+  local -- stale="$XDG_CACHE_HOME"/keywords/0000-stale.json
+  mock_curl_recording
+  write_response "[$(text_block "$KEYWORDS_JSON")]"
+  mkdir -p "${stale%/*}"
+  echo '{}' > "$stale"
+  touch -d '2 days ago' "$stale"
+
+  "$KEYWORDS" <<< 'Input text for cache reuse checks' &>/dev/null ||:
+  assert_equals absent "$([[ -e $stale ]] && echo present || echo absent)" 'Expired entries pruned on write'
+
+  rm -f "$KEYWORDS_MOCK_ARGV"
+  output=$("$KEYWORDS" --min-score 0.95 <<< 'Input text for cache reuse checks' 2>/dev/null) ||:
+  assert_equals absent "$([[ -e $KEYWORDS_MOCK_ARGV ]] && echo present || echo absent)" \
+    'A different --min-score reuses the cached result'
+  assert_not_contains "$output" 'vector search' '--min-score still filters a cached result'
+
+  unmock_curl
+  cleanup_test_env
+}
+
+test_output_file_kept_on_failure() {
+  test_section 'Output File Kept on Failure'
+
+  setup_test_env
+  mock_curl_recording
+  write_response '[]' refusal
+  echo 'previous results' > "$TEST_DIR"/out.txt
+
+  "$KEYWORDS" --no-cache -o "$TEST_DIR"/out.txt <<< 'Input text for a failed extraction' &>/dev/null ||:
+  assert_equals 'previous results' "$(< "$TEST_DIR"/out.txt)" '-o leaves the existing file alone on failure'
+
+  # An unwritable destination is caught before the (paid) API call, not after it
+  local -- output exit_code
+  write_response "[$(text_block "$KEYWORDS_JSON")]"
+  rm -f "$KEYWORDS_MOCK_ARGV"
+  output=$("$KEYWORDS" --no-cache -o "$TEST_DIR"/missing/out.txt <<< 'Input text for a missing directory' 2>&1) \
+    && exit_code=0 || exit_code=$?
+  assert_exit_code 1 "$exit_code" '-o into a missing directory exits 1'
+  assert_contains "$output" 'not writable' '-o into a missing directory explained'
+  assert_equals absent "$([[ -e $KEYWORDS_MOCK_ARGV ]] && echo present || echo absent)" \
+    'No API call when the output cannot be written'
+
+  # A failed write is a runtime error (1), never the usage-error status (2)
+  "$KEYWORDS" --dry-run <<< 'Input text for a closed standard output' >&- 2>/dev/null && exit_code=0 || exit_code=$?
+  assert_exit_code 1 "$exit_code" 'Closed stdout exits 1'
+
+  unmock_curl
+  cleanup_test_env
+}
+
+test_response_json_extraction() {
+  test_section 'JSON Extraction From the Response Text'
+
+  setup_test_env
+  local -- output exit_code
+  mock_curl_recording
+
+  local -- prose=$'Here are the keywords:\n{\n  "keywords": [\n'
+  prose+=$'    {"term": "vector search", "score": 0.9, "type": "technical"}\n  ]\n}\nHope this helps.'
+  write_response "[$(text_block "$prose")]"
+  output=$("$KEYWORDS" --no-cache <<< 'Input text for JSON wrapped in prose' 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" 'Pretty-printed JSON inside prose is accepted'
+  assert_contains "$output" 'vector search' 'Keywords read from the embedded JSON'
+
+  write_response "[$(text_block '{"keywords":"vector search"}')]"
+  output=$("$KEYWORDS" --no-cache <<< 'Input text for a malformed keywords field' 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 1 "$exit_code" 'Non-array keywords field exits 1'
+  assert_contains "$output" 'Could not parse' 'Non-array keywords field reported as unparseable'
+
+  unmock_curl
+  cleanup_test_env
+}
+
+# A command earlier in the caller's PATH must not replace the script's tools
+test_inherited_path_ignored() {
+  test_section 'Inherited PATH Ignored'
+
+  setup_test_env
+  local -- decoy="$TEST_DIR"/decoy
+  mkdir -p "$decoy"
+  printf '#!/bin/bash\ntouch %q\nexec /usr/bin/sha256sum "$@"\n' "$TEST_DIR"/decoy-ran > "$decoy"/sha256sum
+  chmod +x "$decoy"/sha256sum
+  export ANTHROPIC_API_KEY=test-key
+
+  PATH="$decoy:$ORIGINAL_PATH" "$KEYWORDS" --dry-run <<< 'Input text for the inherited PATH check' &>/dev/null ||:
+  assert_equals absent "$([[ -e $TEST_DIR/decoy-ran ]] && echo present || echo absent)" \
+    'sha256sum not taken from the inherited PATH'
+
+  cleanup_test_env
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # DRY-RUN API TESTS (no mocking needed)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -230,6 +531,19 @@ main() {
   test_mocked_api_error
   test_mocked_api_connection_failure
   test_mocked_markdown_response
+  test_thinking_block_before_text
+  test_refusal_reported
+  test_truncated_response_reported
+  test_request_body_defaults
+  test_api_key_not_on_command_line
+  test_large_input
+  test_csv_quoting
+  test_statistics_counters
+  test_cache_write_failure
+  test_cache_reuse_and_pruning
+  test_output_file_kept_on_failure
+  test_response_json_extraction
+  test_inherited_path_ignored
   test_dry_run_no_api
   test_live_api
 

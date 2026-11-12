@@ -13,7 +13,6 @@ source "$SCRIPT_DIR"/test-helpers.sh
 
 # Keywords script
 KEYWORDS="${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}"
-FIXTURES="${FIXTURES_DIR:-$SCRIPT_DIR/fixtures}"
 
 # Test environment
 setup_test_env() {
@@ -76,10 +75,13 @@ test_dry_run_formats() {
   assert_contains "$output" '"keywords"' "JSON format has keywords array"
   assert_contains "$output" '"metadata"' "JSON format has metadata"
 
-  # CSV format
+  # CSV format: rows on stdout, header on stderr so appended batches get no repeated header
   output=$(echo "Test input text for format validation" | "$KEYWORDS" --dry-run -f csv 2>/dev/null) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" "--dry-run with CSV format"
-  assert_contains "$output" "term" "CSV format has header"
+  assert_contains "$output" '"dry-run"' 'CSV row is quoted'
+  # ||: since the exit status was asserted above; this capture only reads stderr
+  output=$(echo "Test input text for format validation" | "$KEYWORDS" --dry-run -f csv 2>&1 >/dev/null) ||:
+  assert_contains "$output" "term" "CSV header on stderr"
 
   cleanup_test_env
 }

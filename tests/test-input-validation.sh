@@ -74,6 +74,17 @@ test_file_input() {
     skip_test "binary-file.bin fixture not found"
   fi
 
+  # A text file that file(1) types as application/json is still text
+  echo '{"note": "plain text content about vector search"}' > "$TEST_DIR"/doc.json
+  output=$("$KEYWORDS" --dry-run "$TEST_DIR"/doc.json 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" 'JSON-typed text file is accepted'
+
+  # An empty file is empty input, not a binary file
+  : > "$TEST_DIR"/blank.txt
+  output=$("$KEYWORDS" --dry-run "$TEST_DIR"/blank.txt 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 1 "$exit_code" 'Empty file exits 1'
+  assert_contains "$output" '[Ee]mpty' 'Empty file reported as empty'
+
   cleanup_test_env
 }
 
@@ -122,12 +133,16 @@ test_text_length() {
     assert_contains "$output" "too short" "Shows too short error (inline)"
   fi
 
-  # Text > 30 chars (minimum required is > 30, not >= 30)
+  # Exactly 30 chars is the minimum
+  output=$(printf '%s' 'This text has exactly 30 chars' | "$KEYWORDS" --dry-run 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" 'Text of exactly 30 chars succeeds'
+
+  # Text > 30 chars
   if [[ -f "$FIXTURES/minimum-input.txt" ]]; then
     output=$("$KEYWORDS" --dry-run "$FIXTURES/minimum-input.txt" 2>&1) && exit_code=0 || exit_code=$?
     assert_exit_code 0 "$exit_code" "Text > 30 chars (31) succeeds"
   else
-    # Create inline test with 31 chars (minimum required is > 30)
+    # Create inline test with 31 chars
     output=$(printf '%s' "This text has exactly 31 chars!" | "$KEYWORDS" --dry-run 2>&1) && exit_code=0 || exit_code=$?
     assert_exit_code 0 "$exit_code" "Text > 30 chars (31) succeeds (inline)"
   fi
@@ -154,13 +169,17 @@ test_api_key_validation() {
   local -- old_key="${ANTHROPIC_API_KEY:-}"
   unset ANTHROPIC_API_KEY
 
-  # Try to run without API key (should fail before dry-run check)
+  # Try to run without API key
   output=$(echo "Test input text for API key validation test" | "$KEYWORDS" 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 1 "$exit_code" "Missing API key exits 1"
   assert_contains "$output" "ANTHROPIC_API_KEY" "Shows API key error"
 
+  # The key is needed only for a real API call
+  output=$(echo 'Test input text for a dry run without a key' | "$KEYWORDS" --dry-run 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" 'Dry run works without an API key'
+
   # Restore API key
-  [[ -n "$old_key" ]] && export ANTHROPIC_API_KEY="$old_key"
+  [[ -z $old_key ]] || export ANTHROPIC_API_KEY="$old_key"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════

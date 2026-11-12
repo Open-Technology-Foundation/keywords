@@ -61,12 +61,15 @@ semantic search|0.82
 ```bash
 $ keywords --format csv --scores --types test-sample.txt
 term,score,type
-"retrieval-augmented generation",0.95,concept
-"RAG systems",0.92,concept
-"Claude API",0.88,technical
-"keyword extraction",0.85,concept
-"semantic search",0.82,concept
+"retrieval-augmented generation",0.95,"concept"
+"RAG systems",0.92,"concept"
+"Claude API",0.88,"technical"
+"keyword extraction",0.85,"concept"
+"semantic search",0.82,"concept"
 ```
+
+The `term,score,type` header line is written to stderr: it shows in a terminal but not in
+redirected output, so `>> all.csv` across many files adds rows without repeated headers.
 
 ### JSON format
 
@@ -91,7 +94,7 @@ $ keywords --format json --entities test-sample.txt
     }
   ],
   "metadata": {
-    "model": "claude-haiku-4-5-20250929",
+    "model": "claude-haiku-5-5",
     "timestamp": "2025-11-07T13:30:00Z",
     "extraction_method": "llm",
     "api_calls": 1,
@@ -125,7 +128,7 @@ $ keywords -st -f json test-sample.txt
 ```bash
 $ keywords test-sample.txt
 # or explicitly:
-$ keywords --model haiku-4-5 test-sample.txt
+$ keywords --model haiku-5-5 test-sample.txt
 
 # Using short model name:
 $ keywords -m haiku test-sample.txt
@@ -134,7 +137,7 @@ $ keywords -m haiku test-sample.txt
 ### Use Sonnet (better accuracy for complex text)
 
 ```bash
-$ keywords --model sonnet-4-5 test-sample.txt
+$ keywords --model sonnet-5-5 test-sample.txt
 # or simply:
 $ keywords -m sonnet test-sample.txt
 ```
@@ -142,16 +145,15 @@ $ keywords -m sonnet test-sample.txt
 ### Use Opus (best quality)
 
 ```bash
-$ keywords --model opus-4-5 test-sample.txt
+$ keywords --model opus-5-5 test-sample.txt
 # or simply:
 $ keywords -m opus test-sample.txt
 ```
 
-### Using specific model versions
+### Using a full model ID
 
 ```bash
-# Use a specific dated version
-$ keywords -m claude-haiku-4-5-20250929 test-sample.txt
+$ keywords -m claude-haiku-5-5 test-sample.txt
 ```
 
 ## Advanced Features
@@ -341,7 +343,7 @@ done
 ```bash
 $ time keywords test-sample.txt
 keywords: ◉ Reading from 'test-sample.txt'
-keywords: ◉ Calling Anthropic API 'claude-haiku-4-5' ...
+keywords: ◉ Calling Anthropic API 'claude-haiku-5-5' ...
 keywords: ✓ Result cached
 keywords: ✓ Extraction complete
 keywords: ◉ API calls: 1
@@ -421,7 +423,7 @@ For very large documents, consider:
 ```bash
 $ keywords --dry-run test-sample.txt
 keywords: ◉ Reading from 'test-sample.txt'
-keywords: ◉ DRY-RUN: Would call API with 1234 characters
+keywords: ◉ [DRY-RUN] Would call API with 1234 characters
 dry-run
 
 keywords: ✓ Extraction complete
@@ -441,7 +443,7 @@ Claude API
 ```bash
 $ keywords --verbose test-sample.txt
 keywords: ◉ Reading from 'test-sample.txt'
-keywords: ◉ Calling Anthropic API 'claude-haiku-4-5' ...
+keywords: ◉ Calling Anthropic API 'claude-haiku-5-5' ...
 keywords: ✓ Result cached
 
 retrieval-augmented generation

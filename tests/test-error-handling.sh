@@ -13,7 +13,6 @@ source "$SCRIPT_DIR"/test-helpers.sh
 
 # Keywords script
 KEYWORDS="${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}"
-FIXTURES="${FIXTURES_DIR:-$SCRIPT_DIR/fixtures}"
 
 # Test environment
 setup_test_env() {

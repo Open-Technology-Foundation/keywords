@@ -62,17 +62,36 @@ test_model_selection() {
   output=$("$KEYWORDS" -m haiku --dry-run --help 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" "-m haiku accepts short model name"
 
-  # -m haiku-4-5
+  # -m haiku-5-5
+  output=$("$KEYWORDS" -m haiku-5-5 --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" "-m haiku-5-5 accepts versioned model name"
+
+  # --model sonnet-5-5
+  output=$("$KEYWORDS" --model sonnet-5-5 --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" "--model sonnet-5-5 works"
+
+  # --model opus-5-5
+  output=$("$KEYWORDS" --model opus-5-5 --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" "--model opus-5-5 works"
+
+  # Full model ID
+  output=$("$KEYWORDS" -m claude-opus-5-5 --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" "-m claude-opus-5-5 accepts full model ID"
+
+  # Superseded models are no longer supported
   output=$("$KEYWORDS" -m haiku-4-5 --help 2>&1) && exit_code=0 || exit_code=$?
-  assert_exit_code 0 "$exit_code" "-m haiku-4-5 accepts full model name"
+  assert_exit_code 2 "$exit_code" "-m haiku-4-5 exits 2 (superseded model)"
 
-  # --model sonnet-4-5
-  output=$("$KEYWORDS" --model sonnet-4-5 --help 2>&1) && exit_code=0 || exit_code=$?
-  assert_exit_code 0 "$exit_code" "--model sonnet-4-5 works"
+  # ANTHROPIC_MODEL goes through the same validation as -m
+  local -- text='Sample input text that is long enough to pass validation'
+  output=$(echo "$text" | ANTHROPIC_API_KEY=test-key ANTHROPIC_MODEL=sonnet "$KEYWORDS" --dry-run 2>&1) \
+    && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" "ANTHROPIC_MODEL=sonnet is accepted"
 
-  # --model opus-4-5
-  output=$("$KEYWORDS" --model opus-4-5 --help 2>&1) && exit_code=0 || exit_code=$?
-  assert_exit_code 0 "$exit_code" "--model opus-4-5 works"
+  output=$(echo "$text" | ANTHROPIC_API_KEY=test-key ANTHROPIC_MODEL=claude-haiku-4-5 "$KEYWORDS" --dry-run 2>&1) \
+    && exit_code=0 || exit_code=$?
+  assert_exit_code 2 "$exit_code" "ANTHROPIC_MODEL=claude-haiku-4-5 exits 2 (superseded model)"
+  assert_contains "$output" "Invalid model" "Superseded ANTHROPIC_MODEL shows error message"
 
   # Invalid model name
   output=$("$KEYWORDS" --model invalid-model 2>&1) && exit_code=0 || exit_code=$?
@@ -127,15 +146,10 @@ test_numeric_options() {
   output=$("$KEYWORDS" --max-tokens 0 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 2 "$exit_code" "--max-tokens 0 exits 2 (invalid)"
 
-  # --temperature
+  # --temperature was removed: current models reject the parameter
   output=$("$KEYWORDS" --temperature 0.5 --help 2>&1) && exit_code=0 || exit_code=$?
-  assert_exit_code 0 "$exit_code" "--temperature 0.5 works"
-
-  output=$("$KEYWORDS" --temperature 0 --help 2>&1) && exit_code=0 || exit_code=$?
-  assert_exit_code 0 "$exit_code" "--temperature 0 works"
-
-  output=$("$KEYWORDS" --temperature abc 2>&1) && exit_code=0 || exit_code=$?
-  assert_exit_code 2 "$exit_code" "--temperature abc exits 2 (invalid)"
+  assert_exit_code 2 "$exit_code" "--temperature exits 2 (option removed)"
+  assert_contains "$output" "Unknown option" "--temperature reported as unknown option"
 
   # --min-score
   output=$("$KEYWORDS" --min-score 0.5 --help 2>&1) && exit_code=0 || exit_code=$?
@@ -288,6 +302,83 @@ test_unknown_options() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# OPTION VALUE VALIDATION TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+test_option_value_validation() {
+  test_section 'Option Value Validation'
+
+  local -- output exit_code tmp
+  tmp=$(mktemp -d)
+
+  # Integer options must not be evaluated as arithmetic (command execution via subscripts)
+  output=$("$KEYWORDS" -n "VERBOSE[\$(touch $tmp/pwned)]" --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 2 "$exit_code" '-n with an arithmetic expression exits 2'
+  assert_equals absent "$([[ -e $tmp/pwned ]] && echo present || echo absent)" '-n value is never executed'
+
+  output=$("$KEYWORDS" -n abc --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 2 "$exit_code" '-n abc exits 2'
+  assert_contains "$output" 'Invalid' '-n abc shows an Invalid message'
+
+  output=$("$KEYWORDS" -n 5.5 --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 2 "$exit_code" '-n 5.5 exits 2'
+
+  output=$("$KEYWORDS" --timeout 10s --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 2 "$exit_code" '--timeout 10s exits 2'
+
+  output=$("$KEYWORDS" --max-tokens 1e3 --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 2 "$exit_code" '--max-tokens 1e3 exits 2'
+
+  # --min-score is a 0.0-1.0 relevance score
+  output=$("$KEYWORDS" --min-score 5 --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 2 "$exit_code" '--min-score 5 exits 2 (out of range)'
+
+  output=$("$KEYWORDS" --min-score 1 --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" '--min-score 1 works'
+
+  output=$("$KEYWORDS" --min-score 1.0 --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" '--min-score 1.0 works'
+
+  rm -rf "$tmp"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# OPERAND TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+test_operands() {
+  test_section 'Operands and Bundling'
+
+  local -- output exit_code tmp
+  tmp=$(mktemp -d)
+  local -- text='Operand test input with enough characters to pass'
+  echo "$text" > "$tmp"/-notes.txt
+  echo "$text" > "$tmp"/a.txt
+  echo "$text" > "$tmp"/b.txt
+  : > "$tmp"/e
+
+  # Bundles must not pick up letters from filenames in the working directory
+  output=$(cd "$tmp" && "$KEYWORDS" '-q?' --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 2 "$exit_code" "-q? exits 2 even when a file named 'e' exists"
+
+  output=$("$KEYWORDS" -qm haiku --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" '-qm haiku bundles an option that takes a value'
+
+  output=$(cd "$tmp" && "$KEYWORDS" --dry-run --no-cache -- -notes.txt 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" '-- allows a filename starting with -'
+  assert_contains "$output" 'dry-run' 'File after -- is processed'
+
+  output=$(echo "$text" | "$KEYWORDS" --dry-run --no-cache - 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" '- reads stdin'
+
+  output=$("$KEYWORDS" --dry-run --no-cache "$tmp"/a.txt "$tmp"/b.txt 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 2 "$exit_code" 'Two input files exit 2'
+  assert_contains "$output" 'one input file' 'Two input files explained'
+
+  rm -rf "$tmp"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # RUN ALL TESTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -300,6 +391,8 @@ main() {
   test_combined_options
   test_output_options
   test_unknown_options
+  test_option_value_validation
+  test_operands
 
   print_summary
 }

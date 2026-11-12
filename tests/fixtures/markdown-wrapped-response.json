@@ -1,0 +1,10 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "Here are the extracted keywords from the text:\n\n```json\n{\"keywords\":[{\"term\":\"test keyword\",\"score\":0.92,\"type\":\"concept\"},{\"term\":\"sample phrase\",\"score\":0.85,\"type\":\"technical\"}]}\n```\n\nThese keywords were extracted based on relevance and importance."
+    }
+  ],
+  "model": "claude-haiku-4-5-20241022",
+  "usage": {"input_tokens": 100, "output_tokens": 60}
+}

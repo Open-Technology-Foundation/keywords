@@ -78,15 +78,14 @@ keywords -stv document.txt
 keywords [OPTIONS] [FILE]
 
 INPUT:
-  FILE                    Input text file (or read from stdin)
+  FILE                    Input text file; '-' or no FILE reads stdin
 
 MODEL OPTIONS:
   -m, --model MODEL       Claude model (haiku|sonnet|opus or full name)
-                            haiku-4-5  (default, fast & cost-effective)
-                            sonnet-4-5 (advanced, better accuracy)
-                            opus-4-5   (premium, best quality)
-  --temperature FLOAT     LLM temperature 0.0-1.0 (default: 0.1)
-  --max-tokens N          Maximum response tokens (default: 2000)
+                            haiku-5-5  (default, fast & cost-effective)
+                            sonnet-5-5 (advanced, better accuracy)
+                            opus-5-5   (premium, best quality)
+  --max-tokens N          Maximum response tokens, thinking included (default: 8000)
   --timeout SECONDS       API timeout in seconds (default: 60)
 
 EXTRACTION OPTIONS:
@@ -94,33 +93,37 @@ EXTRACTION OPTIONS:
   -s, --scores            Include relevance scores (0.0-1.0)
   -t, --types             Include keyword types (concept/technical/entity/action)
   -e, --entities          Extract named entities separately
-  --min-score FLOAT       Minimum relevance score filter (default: 0.0)
+  --min-score FLOAT       Minimum relevance score, 0.0-1.0 (default: 0.0)
   -S, --stopwords         Remove stopwords before extraction (requires stopwords)
 
 OUTPUT OPTIONS:
   -f, --format FORMAT     Output format: text (default), json, csv
-  -o, --output FILE       Write output to file instead of stdout
+  -o, --output FILE       Write output to FILE (left untouched if extraction fails)
 
 CACHE OPTIONS:
   --no-cache              Disable result caching
   --cache-dir DIR         Cache directory (default: ~/.cache/keywords)
 
 GENERAL OPTIONS:
-  -v, --verbose           Verbose output (default)
+  -v, --verbose           Progress messages (the default; undoes -q)
   -q, --quiet             Quiet mode (no progress messages)
   --dry-run               Test mode without API calls
   -h, --help              Show help message
   -V, --version           Print version
+  --                      End of options; the next argument is FILE
 
 SHORT OPTION BUNDLING:
   Options can be bundled: -stSv instead of -s -t -S -v
-  Options requiring values must come last: -st -f json
+  Options requiring values must come last: -st -f json, -qm sonnet
   Note: -S (uppercase) = stopwords, -s (lowercase) = scores
 
 ENVIRONMENT:
-  ANTHROPIC_API_KEY       Required: Your Anthropic API key
-  ANTHROPIC_MODEL         Override default model
+  ANTHROPIC_API_KEY       Your Anthropic API key (not needed for --dry-run or cache hits)
+  ANTHROPIC_MODEL         Default model (same values as --model)
 ```
+
+Integer options (`-n`, `--timeout`, `--max-tokens`) take a positive whole number;
+anything else is a usage error (exit 2).
 
 ---
 
@@ -182,7 +185,7 @@ Structured output with full metadata:
     }
   ],
   "metadata": {
-    "model": "claude-haiku-4-5-20250929",
+    "model": "claude-haiku-5-5",
     "timestamp": "2025-11-07T13:30:00Z",
     "extraction_method": "llm",
     "api_calls": 1,
@@ -193,13 +196,20 @@ Structured output with full metadata:
 
 ### CSV (`-f csv`)
 
-Spreadsheet-compatible format with proper quoting:
+Spreadsheet-compatible rows, every string quoted (RFC 4180). The header line goes to
+**stderr**, so a terminal shows it but redirected output holds rows only; batches appended
+to one file get no repeated headers:
 
-```csv
-term,score,type
-"retrieval-augmented generation",0.95,concept
-"Claude API",0.88,technical
-"keyword extraction",0.85,concept
+```bash
+$ keywords -f csv -st document.txt
+term,score,type                              # stderr
+"retrieval-augmented generation",0.95,"concept"
+"Claude API",0.88,"technical"
+"Jakarta, Indonesia",0.85,"entity"
+
+# One header, then rows from every file
+echo 'term,score,type' > all.csv
+for f in docs/*.txt; do keywords -q -f csv -st "$f" 2>/dev/null >> all.csv; done
 ```
 
 ### Keyword Types
@@ -219,11 +229,13 @@ Keywords are categorized into four semantic types:
 
 ### Available Models
 
-| Model | Aliases | Speed | Cost | Best For |
-|-------|---------|-------|------|----------|
-| claude-haiku-4-5 | `haiku`, `haiku-4-5` | 1-3s | ~$0.001/call | Most use cases (default) |
-| claude-sonnet-4-5 | `sonnet`, `sonnet-4-5` | 3-7s | ~$0.005/call | Complex technical documents |
-| claude-opus-4-5 | `opus`, `opus-4-5` | 5-15s | ~$0.015/call | Critical accuracy requirements |
+Only the current Claude models are supported; earlier model names are rejected.
+
+| Model | Aliases | List price per MTok (input / output) | Best For |
+|-------|---------|--------------------------------------|----------|
+| claude-haiku-5-5 | `haiku`, `haiku-5-5` | $0.10 / $0.50 (prompts up to 100K tokens) | Most use cases (default) |
+| claude-sonnet-5-5 | `sonnet`, `sonnet-5-5` | $2 / $10 | Complex technical documents |
+| claude-opus-5-5 | `opus`, `opus-5-5` | $4 / $20 | Critical accuracy requirements |
 
 ### Usage Examples
 
@@ -235,13 +247,13 @@ keywords document.txt
 keywords -m sonnet document.txt
 
 # Use Opus for critical accuracy
-keywords -m opus-4-5 document.txt
+keywords -m opus-5-5 document.txt
 
-# Specific dated version
-keywords -m claude-haiku-4-5-20250929 document.txt
+# Full model ID
+keywords -m claude-haiku-5-5 document.txt
 
 # Via environment variable
-export ANTHROPIC_MODEL='claude-sonnet-4-5'
+export ANTHROPIC_MODEL='claude-sonnet-5-5'
 keywords document.txt
 ```
 
@@ -294,9 +306,14 @@ The cache key is a SHA256 hash of:
 - Model name
 - Max keywords setting
 - Entity extraction flag
-- Minimum score threshold
+- Prompt version (bumped whenever the prompt changes)
 
-Changing any parameter creates a new cache entry.
+Changing any of these creates a new cache entry. `--min-score` is applied to the cached
+result, so trying a different threshold costs no API call.
+
+Entries expire after 24 hours; expired files are pruned whenever a new result is written.
+If the cache directory cannot be written, the keywords are still printed and a warning
+says so.
 
 ### Cache Location
 
@@ -393,18 +410,6 @@ keywords -e document.txt
 # Emphasizes: organizations, people, products, locations
 ```
 
-### Temperature Control
-
-Adjust output variation:
-
-```bash
-# Lower = more consistent (default: 0.1)
-keywords --temperature 0.0 document.txt
-
-# Higher = more varied
-keywords --temperature 0.5 document.txt
-```
-
 ### Output to File (`-o`)
 
 ```bash
@@ -421,16 +426,15 @@ keywords -f json -o results.json document.txt
 
 ### Script Design
 
-Single-file Bash script (591 lines) with modular function design:
+Single-file Bash script (602 lines) with modular function design:
 
 ```
-keywords (591 lines)
-├── Dependency checks (curl, jq)
-├── Configuration & defaults
+keywords (602 lines)
+├── PATH lock, configuration & defaults
 ├── Helper functions
-│   ├── show_help(), show_version()
-│   ├── log(), warn(), die()
-│   └── expand_model_name()
+│   ├── info(), success(), warn(), error(), die()
+│   ├── noarg(), int_arg(), cleanup()
+│   └── show_usage()
 ├── Caching layer
 │   ├── generate_cache_key()
 │   ├── get_cached_result()
@@ -440,10 +444,13 @@ keywords (591 lines)
 │   ├── call_anthropic_api()
 │   └── parse_json_result()
 ├── Output layer
+│   ├── filter_by_score(), output_fields()
 │   ├── format_as_text()
 │   ├── format_as_csv()
 │   └── format_as_json()
+├── extract_keywords(), validate_and_expand_model()
 └── main()
+    ├── Dependency checks (curl, jq)
     ├── Argument parsing
     ├── Input validation
     └── Orchestration
@@ -455,9 +462,14 @@ keywords (591 lines)
 |---------|----------------|-----------|
 | Pure Bash | No Python/Node deps | Portability, simplicity |
 | SHA256 cache keys | Content-addressable | Deterministic, collision-resistant |
-| 3 JSON parse strategies | Fallback chain | API response robustness |
+| First `{` to last `}` | Reply parsed even inside a code fence or prose | API response robustness |
+| Shape check on `.keywords` | Array of objects with a string `term` | Bad replies fail loudly |
+| Key and text off argv | Header file on an fd; body on stdin | Nothing readable via `ps`; no 128 KB argument limit |
+| Fixed `PATH` | `~/.local/bin:/usr/local/bin:/usr/bin:/bin` | An inherited PATH cannot swap in another `curl` |
+| `curl --retry 2` | Retries timeouts, 408, 429, 5xx | Transient failures |
 | `${var@Q}` quoting | Shell-safe messages | Security, proper escaping |
 | Atomic cache writes | temp file + mv | Concurrency safety |
+| Staged `-o` output | temp file, copied on success | A failed run never empties the target |
 | `readonly` variables | Immutable config | Accidental modification prevention |
 
 ### Exit Codes
@@ -465,8 +477,8 @@ keywords (591 lines)
 | Code | Meaning | Examples |
 |------|---------|----------|
 | 0 | Success | Extraction completed |
-| 1 | Runtime error | API failure, file not found, missing API key |
-| 2 | Usage error | Invalid option, invalid format, invalid model |
+| 1 | Runtime error | API failure, file not found, missing API key, unwritable `-o` target |
+| 2 | Usage error | Invalid option or value, invalid format or model, two input files |
 
 ### Coding Standard
 
@@ -504,19 +516,21 @@ KEYWORDS_TEST_LIVE=1 ./tests/run-all-tests.sh
 
 | Suite | Tests | Coverage |
 |-------|-------|----------|
-| test-argument-parsing.sh | 62 | All CLI options, flags, bundling |
-| test-input-validation.sh | 19 | File input, stdin, length, binary detection |
+| test-argument-parsing.sh | 83 | All CLI options, value validation, bundling, `--`, `-` |
+| test-input-validation.sh | 24 | File input, stdin, length, binary detection, API key |
 | test-error-handling.sh | 16 | Exit codes, error messages, verbose/quiet |
 | test-caching.sh | 10 | Cache directory, key generation, --no-cache |
-| test-api-integration.sh | 14 | Mocked API + optional live tests |
-| test-output-formats.sh | 32 | Text, CSV, JSON with flag combinations |
+| test-api-integration.sh | 46 | Mocked API (request shape, large input, cache, `-o`, PATH) + optional live tests |
+| test-output-formats.sh | 36 | Text, CSV, JSON with flag combinations |
 | test-json-parsing.sh | 14 | JSON structure, fixture validation |
-| test-dry-run.sh | 14 | Dry-run behavior and outputs |
-| **Total** | **181** | **Comprehensive** |
+| test-dry-run.sh | 15 | Dry-run behavior and outputs |
+| **Total** | **244** | |
 
 ### Test Features
 
-- **Mocked API tests**: Use PATH manipulation to intercept curl
+- **Mocked API tests**: A fake `curl` in the test HOME's `~/.local/bin`, the one
+  user-writable directory in the script's fixed PATH
+- **Run to completion**: Assertions record failures without stopping the suite
 - **Isolated environments**: Each test uses temporary directories
 - **Live API tests**: Optional real API validation
 - **BCS test framework**: Shared test-helpers.sh with assertions
@@ -622,7 +636,7 @@ done
 
 | Limit | Value | Behavior |
 |-------|-------|----------|
-| Minimum | 30 chars | Error: "too short" |
+| Minimum | 30 chars | Shorter input: error "too short" |
 | Warning | 200,000 chars | Warning shown, continues |
 | Optimal | 100-10,000 chars | Best performance |
 
@@ -680,7 +694,7 @@ done
 |-------|-------|----------|
 | `authentication_error` | Invalid API key | Check ANTHROPIC_API_KEY |
 | `rate_limit_error` | Too many requests | Wait, use caching |
-| `overloaded_error` | API overloaded | Retry later |
+| `overloaded_error` | API overloaded | Retry later (curl already retries 429 and 5xx twice) |
 | `Could not parse valid JSON` | API response issue | Retry, check API status |
 
 ### Binary File Handling
@@ -770,4 +784,4 @@ GPL-3.0
   - Haiku/Sonnet/Opus model support
   - Smart caching with SHA256 keys
   - Text/JSON/CSV output formats
-  - Comprehensive test suite (181 tests)
+  - Comprehensive test suite (244 assertions)
