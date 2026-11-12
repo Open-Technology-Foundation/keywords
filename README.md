@@ -426,10 +426,10 @@ keywords -f json -o results.json document.txt
 
 ### Script Design
 
-Single-file Bash script (602 lines) with modular function design:
+Single-file Bash script (610 lines) with modular function design:
 
 ```
-keywords (602 lines)
+keywords (610 lines)
 ├── PATH lock, configuration & defaults
 ├── Helper functions
 │   ├── info(), success(), warn(), error(), die()
@@ -779,9 +779,20 @@ GPL-3.0
 
 ## Version History
 
+- **1.1.0** - Audit fixes
+  - Claude 5.5 models only (Haiku, Sonnet, Opus); `--temperature` removed
+  - API key and document text kept off the command line; inputs over 128 KB work
+  - Integer options validated; `--min-score` limited to 0.0-1.0
+  - `--`, `-` (stdin), standard short-option bundling; a second input file is an error
+  - `-o` never empties an existing file on failure; destination checked before the API call
+  - Plain CSV rows quoted; header line on stderr
+  - Cache: `--min-score` no longer in the key, prompt version added, expired entries pruned
+  - API key needed only for real API calls; `curl` retries transient failures
+  - Test suite: 244 assertions, failures no longer abort a suite
+
 - **1.0.0** - Initial release
   - Pure Bash implementation
   - Haiku/Sonnet/Opus model support
   - Smart caching with SHA256 keys
   - Text/JSON/CSV output formats
-  - Comprehensive test suite (244 assertions)
+  - Comprehensive test suite (181 tests)

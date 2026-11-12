@@ -7,7 +7,9 @@ shopt -s inherit_errexit shift_verbose nullglob extglob
 # User tooling: ~/.local/bin stays so a per-user install of stopwords is still found
 declare -rx PATH=~/.local/bin:/usr/local/bin:/usr/bin:/bin
 
-declare -r VERSION='1.0.0'
+### VERSION managed by version
+declare -r VERSION=1.1.0
+###
 #shellcheck disable=SC2155  # realpath of our own path does not fail; declare -r needs one statement
 declare -r SCRIPT_PATH=$(realpath -- "${BASH_SOURCE[0]}")
 declare -r SCRIPT_NAME=${SCRIPT_PATH##*/}
