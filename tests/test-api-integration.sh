@@ -36,7 +36,7 @@ cat "$KEYWORDS_MOCK_FIXTURE"
 exit "$KEYWORDS_MOCK_EXIT"
 MOCK_SCRIPT
 
-  must chmod +x -- "$MOCK_DIR"/curl
+  must chmod -- +x "$MOCK_DIR"/curl
   export KEYWORDS_MOCK_FIXTURE="$fixture_file"
   export KEYWORDS_MOCK_EXIT="$mock_exit_code"
 }
@@ -107,7 +107,7 @@ test_mocked_api_connection_failure() {
 #!/usr/bin/env bash
 exit 7  # curl exit code for connection failure
 MOCK_SCRIPT
-  must chmod +x -- "$MOCK_DIR"/curl
+  must chmod -- +x "$MOCK_DIR"/curl
   export ANTHROPIC_API_KEY="test-mock-key"
 
   output=$(echo "Test input for connection failure" | "$KEYWORDS" --no-cache 2>&1) && exit_code=0 || exit_code=$?
@@ -164,7 +164,7 @@ done
 cat "$KEYWORDS_MOCK_FIXTURE"
 MOCK_SCRIPT
 
-  must chmod +x -- "$MOCK_DIR"/curl
+  must chmod -- +x "$MOCK_DIR"/curl
   export KEYWORDS_MOCK_FIXTURE="$TEST_DIR"/response.json
   export KEYWORDS_MOCK_BODY="$TEST_DIR"/request-body.json
   export KEYWORDS_MOCK_ARGV="$TEST_DIR"/argv.txt
@@ -428,7 +428,7 @@ test_inherited_path_ignored() {
   local -- decoy="$TEST_DIR"/decoy
   must mkdir -p -- "$decoy"
   printf '#!/bin/bash\ntouch %q\nexec /usr/bin/sha256sum "$@"\n' "$TEST_DIR"/decoy-ran > "$decoy"/sha256sum
-  must chmod +x -- "$decoy"/sha256sum
+  must chmod -- +x "$decoy"/sha256sum
   export ANTHROPIC_API_KEY=test-key
 
   env PATH="$decoy:$PATH" "$KEYWORDS" --dry-run <<< 'Input text for the inherited PATH check' &>/dev/null ||:

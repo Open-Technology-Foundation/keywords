@@ -369,7 +369,8 @@ extract_keywords() {
   ((text_length < 200000)) || warn "Large input ($text_length chars) may be slow"
 
   if ((USE_CACHE)); then
-    cache_key=$(generate_cache_key "$input_text")
+    cache_key=$(generate_cache_key "$input_text") \
+      || { error 'Failed to generate cache key'; return 1; }
     if json_result=$(get_cached_result "$cache_key"); then
       CACHE_HITS+=1
       success 'Cache hit'
@@ -384,7 +385,7 @@ extract_keywords() {
       json_result='{"keywords":[{"term":"dry-run","score":1.0,"type":"test"}]}'
     else
       [[ -n $ANTHROPIC_API_KEY ]] || { error 'ANTHROPIC_API_KEY environment variable not set'; return 1; }
-      prompt=$(build_prompt "$input_text")
+      prompt=$(build_prompt "$input_text") || { error 'Failed to build prompt'; return 1; }
       api_response=$(call_anthropic_api "$prompt") || return 1
       API_CALLS+=1
       json_result=$(parse_json_result "$api_response") || return 1
@@ -575,11 +576,11 @@ main() {
       [[ $(file -b --mime-encoding -- "$input_file") != binary ]] \
         || die 1 "Input file appears to be binary, not text ${input_file@Q}"
     fi
-    input_text=$(< "$input_file")
+    input_text=$(< "$input_file") || die 1 "Cannot read ${input_file@Q}"
     info "Reading from ${input_file@Q}"
   else
     [[ ! -t 0 ]] || die 1 'No input file specified and stdin is a terminal'
-    input_text=$(cat)
+    input_text=$(cat) || die 1 'Cannot read stdin'
     info 'Reading from stdin'
   fi
 
