@@ -367,6 +367,37 @@ test_cache_reuse_and_pruning() {
   cleanup_test_env
 }
 
+test_cache_dir_leading_dash() {
+  test_section 'Cache Directory Beginning With a Dash'
+
+  setup_test_env
+  local -- work="$TEST_DIR"/work output exit_code
+  local -a entries=()
+  mock_curl_recording
+  write_response "[$(text_block "$KEYWORDS_JSON")]"
+  must mkdir -p -- "$work"
+  must touch -- "$work"/notes.txt
+
+  # find reads a starting point that begins with - as expression, -- or not, so the cache
+  # prune once ran -delete on the current directory. The subshell and scratch dir keep a
+  # regression from reaching anything outside this test
+  (cd -- "$work" && "$KEYWORDS" --cache-dir -delete <<< 'Input text for a dash cache dir') \
+    &>/dev/null ||:
+  assert_equals present "$([[ -e $work/notes.txt ]] && echo present || echo absent)" \
+    'Files in the current directory survive --cache-dir -delete'
+  entries=("$work"/-delete/*.json)
+  assert_equals 1 "${#entries[@]}" 'Result cached in ./-delete'
+
+  # ./ is added to relative paths, which would turn an empty value into the current directory
+  output=$("$KEYWORDS" --dry-run --cache-dir '' <<< 'Input text for an empty cache dir' 2>&1) \
+    && exit_code=0 || exit_code=$?
+  assert_exit_code 2 "$exit_code" 'Empty --cache-dir is a usage error'
+  assert_contains "$output" '--cache-dir' 'Error names the option'
+
+  unmock_curl
+  cleanup_test_env
+}
+
 test_output_file_kept_on_failure() {
   test_section 'Output File Kept on Failure'
 
@@ -515,6 +546,7 @@ main() {
   test_statistics_counters
   test_cache_write_failure
   test_cache_reuse_and_pruning
+  test_cache_dir_leading_dash
   test_output_file_kept_on_failure
   test_response_json_extraction
   test_inherited_path_ignored

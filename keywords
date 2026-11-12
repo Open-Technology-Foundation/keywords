@@ -551,6 +551,12 @@ main() {
   # ANTHROPIC_MODEL from the environment gets the same check as -m
   validate_and_expand_model "$ANTHROPIC_MODEL"
 
+  # find reads a starting point that begins with - as expression, -- or not: unprefixed,
+  # --cache-dir -delete made the cache prune delete the current directory's files. An empty
+  # value is refused because the prefix would turn it into the current directory
+  [[ -n $CACHE_DIR ]] || die 2 "Empty value for '--cache-dir'"
+  [[ $CACHE_DIR == /* ]] || CACHE_DIR=./$CACHE_DIR
+
   readonly ANTHROPIC_MODEL MAX_KEYWORDS API_TIMEOUT MAX_TOKENS STOPWORDS USE_CACHE \
     INCLUDE_SCORES INCLUDE_TYPES INCLUDE_ENTITIES VERBOSE DRY_RUN \
     OUTPUT_FORMAT MIN_SCORE OUTPUT_FILE CACHE_DIR
