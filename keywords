@@ -73,7 +73,7 @@ noarg() { (($# > 1)) || die 2 "Missing value for ${1@Q}"; }
 
 # Integer options are declare -i: assigning unchecked text evaluates it as arithmetic,
 # which runs any command substitution inside an array subscript
-#bcscheck disable=BCS0602
+#bcscheck disable=BCS0602  # usage errors exit 2 under the published 0/1/2 contract, not 22
 int_arg() {
   [[ $2 =~ ^[1-9][0-9]{0,6}$ ]] || die 2 "Invalid value ${2@Q} for ${1@Q} (positive integer)"
 }
@@ -410,7 +410,7 @@ extract_keywords() {
   esac || { error 'Failed to write output'; return 1; }
 }
 
-#bcscheck disable=BCS0602
+#bcscheck disable=BCS0602  # usage errors exit 2 under the published 0/1/2 contract, not 22
 validate_and_expand_model() {
   case $1 in
     haiku|haiku-5-5|claude-haiku-5-5)

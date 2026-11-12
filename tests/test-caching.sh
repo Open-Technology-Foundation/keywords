@@ -4,28 +4,17 @@
 set -euo pipefail
 shopt -s inherit_errexit extglob nullglob
 
-# Script metadata
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+declare -rx PATH=/usr/local/bin:/usr/bin:/bin
+#shellcheck disable=SC2155  # realpath of our own path does not fail; declare -r needs one statement
+declare -r SCRIPT_PATH=$(realpath -- "${BASH_SOURCE[0]}")
+declare -r SCRIPT_DIR=${SCRIPT_PATH%/*}
 
-# Source test helpers
-#shellcheck source=test-helpers.sh
-source "$SCRIPT_DIR"/test-helpers.sh
+declare -r HELPERS=$SCRIPT_DIR/test-helpers.sh
+[[ -f $HELPERS ]] || { >&2 echo "Missing ${HELPERS@Q}"; exit 1; }
+#shellcheck source=SCRIPTDIR/test-helpers.sh
+source -- "$HELPERS" || { >&2 echo "Cannot source ${HELPERS@Q}"; exit 1; }
 
-# Keywords script
-KEYWORDS="${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}"
-
-# Test environment
-setup_test_env() {
-  TEST_DIR=$(mktemp -d)
-  export HOME="$TEST_DIR/home"
-  export XDG_CACHE_HOME="$TEST_DIR/cache"
-  export ANTHROPIC_API_KEY="test-key-for-caching"
-  mkdir -p "$HOME"
-}
-
-cleanup_test_env() {
-  [[ -d "${TEST_DIR:-}" ]] && rm -rf "$TEST_DIR" || true
-}
+declare -r KEYWORDS=${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}
 
 trap cleanup_test_env EXIT
 
@@ -38,9 +27,6 @@ test_cache_directory() {
 
   setup_test_env
   local -- output exit_code
-
-  # Cache directory should be created on first run
-  [[ ! -d "$XDG_CACHE_HOME/keywords" ]] || rm -rf "$XDG_CACHE_HOME/keywords"
 
   output=$(echo "Test input text for cache directory creation" | "$KEYWORDS" --dry-run 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" "Script runs successfully"
@@ -129,7 +115,7 @@ test_xdg_cache_home() {
 
   # XDG_CACHE_HOME should be respected
   export XDG_CACHE_HOME="$TEST_DIR/xdg-cache"
-  mkdir -p "$XDG_CACHE_HOME"
+  must mkdir -p -- "$XDG_CACHE_HOME"
 
   output=$(echo "Test input for XDG cache validation" | "$KEYWORDS" --dry-run 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" "XDG_CACHE_HOME is respected"

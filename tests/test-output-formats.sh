@@ -4,28 +4,17 @@
 set -euo pipefail
 shopt -s inherit_errexit extglob nullglob
 
-# Script metadata
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+declare -rx PATH=/usr/local/bin:/usr/bin:/bin
+#shellcheck disable=SC2155  # realpath of our own path does not fail; declare -r needs one statement
+declare -r SCRIPT_PATH=$(realpath -- "${BASH_SOURCE[0]}")
+declare -r SCRIPT_DIR=${SCRIPT_PATH%/*}
 
-# Source test helpers
-#shellcheck source=test-helpers.sh
-source "$SCRIPT_DIR"/test-helpers.sh
+declare -r HELPERS=$SCRIPT_DIR/test-helpers.sh
+[[ -f $HELPERS ]] || { >&2 echo "Missing ${HELPERS@Q}"; exit 1; }
+#shellcheck source=SCRIPTDIR/test-helpers.sh
+source -- "$HELPERS" || { >&2 echo "Cannot source ${HELPERS@Q}"; exit 1; }
 
-# Keywords script
-KEYWORDS="${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}"
-
-# Test environment
-setup_test_env() {
-  TEST_DIR=$(mktemp -d)
-  export HOME="$TEST_DIR/home"
-  export XDG_CACHE_HOME="$TEST_DIR/cache"
-  export ANTHROPIC_API_KEY="test-key-for-output"
-  mkdir -p "$HOME" "$XDG_CACHE_HOME"
-}
-
-cleanup_test_env() {
-  [[ -d "${TEST_DIR:-}" ]] && rm -rf "$TEST_DIR" || true
-}
+declare -r KEYWORDS=${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}
 
 trap cleanup_test_env EXIT
 
@@ -60,10 +49,10 @@ test_text_format() {
   # Text with both scores and types (-st)
   output=$(echo "$TEST_INPUT" | "$KEYWORDS" --dry-run -f text -st 2>/dev/null) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" "Text with scores and types succeeds"
-  # Should have two pipe delimiters (term|score|type)
-  local -- pipe_count
-  pipe_count=$(echo "$output" | grep -o '|' | wc -l)
-  assert_greater_than "$pipe_count" 1 "Text with both has multiple delimiters"
+  # Should have two pipe delimiters (term|score|type). Counted with an expansion: a
+  # grep pipeline fails when there is no match, which would end the suite under set -e
+  local -- pipes=${output//[^|]/}
+  assert_greater_than "${#pipes}" 1 "Text with both has multiple delimiters"
 
   cleanup_test_env
 }
@@ -160,15 +149,17 @@ test_output_file() {
   assert_file_exists "$output_file" "Output file created"
 
   # File contains output
-  local -- file_content
-  file_content=$(<"$output_file")
+  # Read only if present: a failed $(< file) would end the suite under set -e
+  local -- file_content=''
+  [[ ! -f $output_file ]] || file_content=$(< "$output_file")
   assert_contains "$file_content" "dry-run" "Output file has content"
 
   # Test with different formats
   local -- json_file="$TEST_DIR/output.json"
   output=$(echo "$TEST_INPUT" | "$KEYWORDS" --dry-run -f json -o "$json_file" 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" "-o with JSON format succeeds"
-  file_content=$(<"$json_file")
+  file_content=''
+  [[ ! -f $json_file ]] || file_content=$(< "$json_file")
   assert_contains "$file_content" '"keywords"' "JSON output file has keywords"
 
   cleanup_test_env

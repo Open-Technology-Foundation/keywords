@@ -4,15 +4,19 @@
 set -euo pipefail
 shopt -s inherit_errexit extglob nullglob
 
-# Script metadata
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+declare -rx PATH=/usr/local/bin:/usr/bin:/bin
+#shellcheck disable=SC2155  # realpath of our own path does not fail; declare -r needs one statement
+declare -r SCRIPT_PATH=$(realpath -- "${BASH_SOURCE[0]}")
+declare -r SCRIPT_DIR=${SCRIPT_PATH%/*}
 
-# Source test helpers
-#shellcheck source=test-helpers.sh
-source "$SCRIPT_DIR"/test-helpers.sh
+declare -r HELPERS=$SCRIPT_DIR/test-helpers.sh
+[[ -f $HELPERS ]] || { >&2 echo "Missing ${HELPERS@Q}"; exit 1; }
+#shellcheck source=SCRIPTDIR/test-helpers.sh
+source -- "$HELPERS" || { >&2 echo "Cannot source ${HELPERS@Q}"; exit 1; }
 
-# Keywords script (exported by run-all-tests.sh or set here)
-KEYWORDS="${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}"
+declare -r KEYWORDS=${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}
+
+trap cleanup_test_env EXIT
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELP AND VERSION TESTS
@@ -263,23 +267,26 @@ test_output_options() {
   test_section "Output Options"
 
   local -- output exit_code
+  setup_test_env
 
-  # -o / --output
-  output=$("$KEYWORDS" -o /tmp/test-output.txt --help 2>&1) && exit_code=0 || exit_code=$?
-  assert_exit_code 0 "$exit_code" "-o /tmp/test-output.txt works"
+  # --help exits before anything is written; the paths stay inside the test's own temp dir anyway
+  output=$("$KEYWORDS" -o "$TEST_DIR"/out.txt --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" '-o FILE works'
 
-  output=$("$KEYWORDS" --output /tmp/test-output.txt --help 2>&1) && exit_code=0 || exit_code=$?
-  assert_exit_code 0 "$exit_code" "--output works"
+  output=$("$KEYWORDS" --output "$TEST_DIR"/out.txt --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" '--output works'
 
   output=$("$KEYWORDS" -o 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 2 "$exit_code" "-o without value exits 2"
 
   # --cache-dir
-  output=$("$KEYWORDS" --cache-dir /tmp/test-cache --help 2>&1) && exit_code=0 || exit_code=$?
-  assert_exit_code 0 "$exit_code" "--cache-dir works"
+  output=$("$KEYWORDS" --cache-dir "$TEST_DIR"/cache --help 2>&1) && exit_code=0 || exit_code=$?
+  assert_exit_code 0 "$exit_code" '--cache-dir works'
 
   output=$("$KEYWORDS" --cache-dir 2>&1) && exit_code=0 || exit_code=$?
-  assert_exit_code 2 "$exit_code" "--cache-dir without value exits 2"
+  assert_exit_code 2 "$exit_code" '--cache-dir without value exits 2'
+
+  cleanup_test_env
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -308,13 +315,13 @@ test_unknown_options() {
 test_option_value_validation() {
   test_section 'Option Value Validation'
 
-  local -- output exit_code tmp
-  tmp=$(mktemp -d)
+  local -- output exit_code
+  setup_test_env
 
   # Integer options must not be evaluated as arithmetic (command execution via subscripts)
-  output=$("$KEYWORDS" -n "VERBOSE[\$(touch $tmp/pwned)]" --help 2>&1) && exit_code=0 || exit_code=$?
+  output=$("$KEYWORDS" -n "VERBOSE[\$(touch $TEST_DIR/pwned)]" --help 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 2 "$exit_code" '-n with an arithmetic expression exits 2'
-  assert_equals absent "$([[ -e $tmp/pwned ]] && echo present || echo absent)" '-n value is never executed'
+  assert_equals absent "$([[ -e $TEST_DIR/pwned ]] && echo present || echo absent)" '-n value is never executed'
 
   output=$("$KEYWORDS" -n abc --help 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 2 "$exit_code" '-n abc exits 2'
@@ -339,7 +346,7 @@ test_option_value_validation() {
   output=$("$KEYWORDS" --min-score 1.0 --help 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" '--min-score 1.0 works'
 
-  rm -rf "$tmp"
+  cleanup_test_env
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -349,33 +356,33 @@ test_option_value_validation() {
 test_operands() {
   test_section 'Operands and Bundling'
 
-  local -- output exit_code tmp
-  tmp=$(mktemp -d)
+  local -- output exit_code
+  setup_test_env
   local -- text='Operand test input with enough characters to pass'
-  echo "$text" > "$tmp"/-notes.txt
-  echo "$text" > "$tmp"/a.txt
-  echo "$text" > "$tmp"/b.txt
-  : > "$tmp"/e
+  echo "$text" > "$TEST_DIR"/-notes.txt
+  echo "$text" > "$TEST_DIR"/a.txt
+  echo "$text" > "$TEST_DIR"/b.txt
+  : > "$TEST_DIR"/e
 
   # Bundles must not pick up letters from filenames in the working directory
-  output=$(cd "$tmp" && "$KEYWORDS" '-q?' --help 2>&1) && exit_code=0 || exit_code=$?
+  output=$(cd -- "$TEST_DIR" && "$KEYWORDS" '-q?' --help 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 2 "$exit_code" "-q? exits 2 even when a file named 'e' exists"
 
   output=$("$KEYWORDS" -qm haiku --help 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" '-qm haiku bundles an option that takes a value'
 
-  output=$(cd "$tmp" && "$KEYWORDS" --dry-run --no-cache -- -notes.txt 2>&1) && exit_code=0 || exit_code=$?
+  output=$(cd -- "$TEST_DIR" && "$KEYWORDS" --dry-run --no-cache -- -notes.txt 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" '-- allows a filename starting with -'
   assert_contains "$output" 'dry-run' 'File after -- is processed'
 
   output=$(echo "$text" | "$KEYWORDS" --dry-run --no-cache - 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" '- reads stdin'
 
-  output=$("$KEYWORDS" --dry-run --no-cache "$tmp"/a.txt "$tmp"/b.txt 2>&1) && exit_code=0 || exit_code=$?
+  output=$("$KEYWORDS" --dry-run --no-cache -- "$TEST_DIR"/a.txt "$TEST_DIR"/b.txt 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 2 "$exit_code" 'Two input files exit 2'
   assert_contains "$output" 'one input file' 'Two input files explained'
 
-  rm -rf "$tmp"
+  cleanup_test_env
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════

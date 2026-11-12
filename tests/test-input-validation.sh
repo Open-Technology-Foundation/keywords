@@ -4,29 +4,18 @@
 set -euo pipefail
 shopt -s inherit_errexit extglob nullglob
 
-# Script metadata
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+declare -rx PATH=/usr/local/bin:/usr/bin:/bin
+#shellcheck disable=SC2155  # realpath of our own path does not fail; declare -r needs one statement
+declare -r SCRIPT_PATH=$(realpath -- "${BASH_SOURCE[0]}")
+declare -r SCRIPT_DIR=${SCRIPT_PATH%/*}
 
-# Source test helpers
-#shellcheck source=test-helpers.sh
-source "$SCRIPT_DIR"/test-helpers.sh
+declare -r HELPERS=$SCRIPT_DIR/test-helpers.sh
+[[ -f $HELPERS ]] || { >&2 echo "Missing ${HELPERS@Q}"; exit 1; }
+#shellcheck source=SCRIPTDIR/test-helpers.sh
+source -- "$HELPERS" || { >&2 echo "Cannot source ${HELPERS@Q}"; exit 1; }
 
-# Keywords script and fixtures
-KEYWORDS="${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}"
-FIXTURES="${FIXTURES_DIR:-$SCRIPT_DIR/fixtures}"
-
-# Test environment setup
-setup_test_env() {
-  TEST_DIR=$(mktemp -d)
-  export HOME="$TEST_DIR/home"
-  export XDG_CACHE_HOME="$TEST_DIR/cache"
-  export ANTHROPIC_API_KEY="test-key-for-validation"
-  mkdir -p "$HOME" "$XDG_CACHE_HOME"
-}
-
-cleanup_test_env() {
-  [[ -d "${TEST_DIR:-}" ]] && rm -rf "$TEST_DIR" || true
-}
+declare -r KEYWORDS=${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}
+declare -r FIXTURES=${FIXTURES_DIR:-$SCRIPT_DIR/fixtures}
 
 trap cleanup_test_env EXIT
 
@@ -43,7 +32,7 @@ test_file_input() {
   # Valid text file (using test-sample.txt from project root)
   local -- sample_file="$SCRIPT_DIR/../test-sample.txt"
   if [[ -f "$sample_file" ]]; then
-    output=$("$KEYWORDS" --dry-run "$sample_file" 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$KEYWORDS" --dry-run -- "$sample_file" 2>&1) && exit_code=0 || exit_code=$?
     assert_exit_code 0 "$exit_code" "Valid text file is accepted"
     assert_contains "$output" "dry-run" "Dry-run processes file"
   else
@@ -58,16 +47,16 @@ test_file_input() {
   # Unreadable file
   local -- unreadable="$TEST_DIR/unreadable.txt"
   echo "Some test content for the unreadable file test" > "$unreadable"
-  chmod 000 "$unreadable"
-  output=$("$KEYWORDS" "$unreadable" 2>&1) && exit_code=0 || exit_code=$?
+  must chmod -- 000 "$unreadable"
+  output=$("$KEYWORDS" -- "$unreadable" 2>&1) && exit_code=0 || exit_code=$?
   # Restore permissions for cleanup
-  chmod 644 "$unreadable"
+  must chmod -- 644 "$unreadable"
   assert_exit_code 1 "$exit_code" "Unreadable file exits 1"
   assert_contains "$output" "not readable" "Shows not readable error"
 
   # Binary file
   if [[ -f "$FIXTURES/binary-file.bin" ]]; then
-    output=$("$KEYWORDS" "$FIXTURES/binary-file.bin" 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$KEYWORDS" -- "$FIXTURES"/binary-file.bin 2>&1) && exit_code=0 || exit_code=$?
     assert_exit_code 1 "$exit_code" "Binary file exits 1"
     assert_contains "$output" "binary" "Shows binary file error"
   else
@@ -76,12 +65,12 @@ test_file_input() {
 
   # A text file that file(1) types as application/json is still text
   echo '{"note": "plain text content about vector search"}' > "$TEST_DIR"/doc.json
-  output=$("$KEYWORDS" --dry-run "$TEST_DIR"/doc.json 2>&1) && exit_code=0 || exit_code=$?
+  output=$("$KEYWORDS" --dry-run -- "$TEST_DIR"/doc.json 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" 'JSON-typed text file is accepted'
 
   # An empty file is empty input, not a binary file
   : > "$TEST_DIR"/blank.txt
-  output=$("$KEYWORDS" --dry-run "$TEST_DIR"/blank.txt 2>&1) && exit_code=0 || exit_code=$?
+  output=$("$KEYWORDS" --dry-run -- "$TEST_DIR"/blank.txt 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 1 "$exit_code" 'Empty file exits 1'
   assert_contains "$output" '[Ee]mpty' 'Empty file reported as empty'
 
@@ -123,7 +112,7 @@ test_text_length() {
 
   # Text < 30 chars (too short)
   if [[ -f "$FIXTURES/short-input.txt" ]]; then
-    output=$("$KEYWORDS" "$FIXTURES/short-input.txt" 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$KEYWORDS" -- "$FIXTURES"/short-input.txt 2>&1) && exit_code=0 || exit_code=$?
     assert_exit_code 1 "$exit_code" "Text < 30 chars exits 1"
     assert_contains "$output" "too short" "Shows too short error"
   else
@@ -139,7 +128,7 @@ test_text_length() {
 
   # Text > 30 chars
   if [[ -f "$FIXTURES/minimum-input.txt" ]]; then
-    output=$("$KEYWORDS" --dry-run "$FIXTURES/minimum-input.txt" 2>&1) && exit_code=0 || exit_code=$?
+    output=$("$KEYWORDS" --dry-run -- "$FIXTURES"/minimum-input.txt 2>&1) && exit_code=0 || exit_code=$?
     assert_exit_code 0 "$exit_code" "Text > 30 chars (31) succeeds"
   else
     # Create inline test with 31 chars
@@ -147,9 +136,10 @@ test_text_length() {
     assert_exit_code 0 "$exit_code" "Text > 30 chars (31) succeeds (inline)"
   fi
 
-  # Long text (should work but may warn)
+  # 500 chars, well over the minimum; builtins only, so nothing here can fail
   local -- long_text
-  long_text=$(head -c 1000 /dev/urandom | base64 | head -c 500)
+  printf -v long_text '%500s' ''
+  long_text=${long_text// /x}
   output=$(echo "$long_text" | "$KEYWORDS" --dry-run 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" "Long text is processed"
 

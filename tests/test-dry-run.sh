@@ -4,28 +4,17 @@
 set -euo pipefail
 shopt -s inherit_errexit extglob nullglob
 
-# Script metadata
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+declare -rx PATH=/usr/local/bin:/usr/bin:/bin
+#shellcheck disable=SC2155  # realpath of our own path does not fail; declare -r needs one statement
+declare -r SCRIPT_PATH=$(realpath -- "${BASH_SOURCE[0]}")
+declare -r SCRIPT_DIR=${SCRIPT_PATH%/*}
 
-# Source test helpers
-#shellcheck source=test-helpers.sh
-source "$SCRIPT_DIR"/test-helpers.sh
+declare -r HELPERS=$SCRIPT_DIR/test-helpers.sh
+[[ -f $HELPERS ]] || { >&2 echo "Missing ${HELPERS@Q}"; exit 1; }
+#shellcheck source=SCRIPTDIR/test-helpers.sh
+source -- "$HELPERS" || { >&2 echo "Cannot source ${HELPERS@Q}"; exit 1; }
 
-# Keywords script
-KEYWORDS="${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}"
-
-# Test environment
-setup_test_env() {
-  TEST_DIR=$(mktemp -d)
-  export HOME="$TEST_DIR/home"
-  export XDG_CACHE_HOME="$TEST_DIR/cache"
-  export ANTHROPIC_API_KEY="test-key-for-dry-run"
-  mkdir -p "$HOME" "$XDG_CACHE_HOME"
-}
-
-cleanup_test_env() {
-  [[ -d "${TEST_DIR:-}" ]] && rm -rf "$TEST_DIR" || true
-}
+declare -r KEYWORDS=${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}
 
 trap cleanup_test_env EXIT
 

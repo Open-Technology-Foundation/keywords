@@ -5,41 +5,18 @@
 set -euo pipefail
 shopt -s inherit_errexit extglob nullglob
 
-# Script metadata
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+declare -rx PATH=/usr/local/bin:/usr/bin:/bin
+#shellcheck disable=SC2155  # realpath of our own path does not fail; declare -r needs one statement
+declare -r SCRIPT_PATH=$(realpath -- "${BASH_SOURCE[0]}")
+declare -r SCRIPT_DIR=${SCRIPT_PATH%/*}
 
-# Source test helpers
-#shellcheck source=test-helpers.sh
-source "$SCRIPT_DIR"/test-helpers.sh
+declare -r HELPERS=$SCRIPT_DIR/test-helpers.sh
+[[ -f $HELPERS ]] || { >&2 echo "Missing ${HELPERS@Q}"; exit 1; }
+#shellcheck source=SCRIPTDIR/test-helpers.sh
+source -- "$HELPERS" || { >&2 echo "Cannot source ${HELPERS@Q}"; exit 1; }
 
-# Keywords script
-KEYWORDS="${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}"
-FIXTURES="${FIXTURES_DIR:-$SCRIPT_DIR/fixtures}"
-
-# Test environment
-declare -- ORIGINAL_PATH="$PATH"
-declare -- ORIGINAL_HOME="$HOME"
-declare -- ORIGINAL_XDG_CACHE_HOME="${XDG_CACHE_HOME:-}"
-declare -- ORIGINAL_API_KEY="${ANTHROPIC_API_KEY:-}"
-declare -- MOCK_DIR=""
-
-setup_test_env() {
-  TEST_DIR=$(mktemp -d)
-  # The script locks PATH to ~/.local/bin:/usr/local/bin:/usr/bin:/bin, so mocks
-  # live in the test HOME's ~/.local/bin rather than in a directory added to PATH
-  MOCK_DIR="$TEST_DIR/home/.local/bin"
-  export HOME="$TEST_DIR/home"
-  export XDG_CACHE_HOME="$TEST_DIR/cache"
-  mkdir -p "$HOME" "$XDG_CACHE_HOME" "$MOCK_DIR"
-}
-
-cleanup_test_env() {
-  export PATH="$ORIGINAL_PATH"
-  export HOME="$ORIGINAL_HOME"
-  [[ -n "$ORIGINAL_XDG_CACHE_HOME" ]] && export XDG_CACHE_HOME="$ORIGINAL_XDG_CACHE_HOME" || unset XDG_CACHE_HOME
-  [[ -n "$ORIGINAL_API_KEY" ]] && export ANTHROPIC_API_KEY="$ORIGINAL_API_KEY" || unset ANTHROPIC_API_KEY
-  [[ -d "${TEST_DIR:-}" ]] && rm -rf "$TEST_DIR" || true
-}
+declare -r KEYWORDS=${KEYWORDS_SCRIPT:-$SCRIPT_DIR/../keywords}
+declare -r FIXTURES=${FIXTURES_DIR:-$SCRIPT_DIR/fixtures}
 
 trap cleanup_test_env EXIT
 
@@ -52,21 +29,20 @@ mock_curl() {
   local -- fixture_file="$1"
   local -i mock_exit_code="${2:-0}"
 
-  cat > "$MOCK_DIR/curl" << 'MOCK_SCRIPT'
+  cat > "$MOCK_DIR"/curl << 'MOCK_SCRIPT'
 #!/usr/bin/env bash
 # Mock curl - returns fixture content
 cat "$KEYWORDS_MOCK_FIXTURE"
 exit "$KEYWORDS_MOCK_EXIT"
 MOCK_SCRIPT
 
-  chmod +x "$MOCK_DIR/curl"
+  must chmod +x -- "$MOCK_DIR"/curl
   export KEYWORDS_MOCK_FIXTURE="$fixture_file"
   export KEYWORDS_MOCK_EXIT="$mock_exit_code"
-  export PATH="$MOCK_DIR:$ORIGINAL_PATH"
 }
 
 unmock_curl() {
-  export PATH="$ORIGINAL_PATH"
+  must rm -f -- "$MOCK_DIR"/curl
   unset KEYWORDS_MOCK_FIXTURE KEYWORDS_MOCK_EXIT
 }
 
@@ -131,8 +107,7 @@ test_mocked_api_connection_failure() {
 #!/usr/bin/env bash
 exit 7  # curl exit code for connection failure
 MOCK_SCRIPT
-  chmod +x "$MOCK_DIR/curl"
-  export PATH="$MOCK_DIR:$ORIGINAL_PATH"
+  must chmod +x -- "$MOCK_DIR"/curl
   export ANTHROPIC_API_KEY="test-mock-key"
 
   output=$(echo "Test input for connection failure" | "$KEYWORDS" --no-cache 2>&1) && exit_code=0 || exit_code=$?
@@ -182,20 +157,19 @@ while (($#)); do
   case $1 in
     -d) printf '%s' "$2" > "$KEYWORDS_MOCK_BODY" ;;
     --data-binary) [[ $2 == @- ]] && cat > "$KEYWORDS_MOCK_BODY" || printf '%s' "$2" > "$KEYWORDS_MOCK_BODY" ;;
-    -H) [[ $2 != @* ]] || cat "${2:1}" >> "$KEYWORDS_MOCK_HEADERS" ;;
+    -H) [[ $2 != @* ]] || cat -- "${2:1}" >> "$KEYWORDS_MOCK_HEADERS" ;;
   esac
   shift
 done
 cat "$KEYWORDS_MOCK_FIXTURE"
 MOCK_SCRIPT
 
-  chmod +x "$MOCK_DIR"/curl
+  must chmod +x -- "$MOCK_DIR"/curl
   export KEYWORDS_MOCK_FIXTURE="$TEST_DIR"/response.json
   export KEYWORDS_MOCK_BODY="$TEST_DIR"/request-body.json
   export KEYWORDS_MOCK_ARGV="$TEST_DIR"/argv.txt
   export KEYWORDS_MOCK_HEADERS="$TEST_DIR"/headers.txt
   export KEYWORDS_MOCK_EXIT=0
-  export PATH="$MOCK_DIR:$ORIGINAL_PATH"
   export ANTHROPIC_API_KEY=test-mock-key
 }
 
@@ -264,8 +238,8 @@ test_request_body_defaults() {
   write_response "[$(text_block "$KEYWORDS_JSON")]"
 
   echo 'Test input for inspecting the default request body' | "$KEYWORDS" --no-cache &>/dev/null ||:
-  assert_equals false "$(jq -r 'has("temperature")' "$KEYWORDS_MOCK_BODY")" 'temperature is not sent by default'
-  assert_equals 8000 "$(jq -r '.max_tokens' "$KEYWORDS_MOCK_BODY")" 'Default max_tokens leaves room for thinking'
+  assert_equals false "$(jq -r 'has("temperature")' < "$KEYWORDS_MOCK_BODY")" 'temperature is not sent by default'
+  assert_equals 8000 "$(jq -r '.max_tokens' < "$KEYWORDS_MOCK_BODY")" 'Default max_tokens leaves room for thinking'
   assert_contains "$(< "$KEYWORDS_MOCK_ARGV")" '--retry' 'Transient failures are retried'
 
   unmock_curl
@@ -301,7 +275,7 @@ test_large_input() {
 
   output=$("$KEYWORDS" --no-cache <<< "$input" 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" '168 KB input succeeds'
-  assert_greater_than "$(jq -r '.messages[0].content | length' "$KEYWORDS_MOCK_BODY" 2>/dev/null)" 167999 \
+  assert_greater_than "$(jq -r '.messages[0].content | length' 2>/dev/null < "$KEYWORDS_MOCK_BODY")" 167999 \
     'Whole document reaches the request body'
 
   if command -v stopwords &>/dev/null; then
@@ -376,14 +350,14 @@ test_cache_reuse_and_pruning() {
   local -- stale="$XDG_CACHE_HOME"/keywords/0000-stale.json
   mock_curl_recording
   write_response "[$(text_block "$KEYWORDS_JSON")]"
-  mkdir -p "${stale%/*}"
+  must mkdir -p -- "${stale%/*}"
   echo '{}' > "$stale"
-  touch -d '2 days ago' "$stale"
+  must touch -d '2 days ago' -- "$stale"
 
   "$KEYWORDS" <<< 'Input text for cache reuse checks' &>/dev/null ||:
   assert_equals absent "$([[ -e $stale ]] && echo present || echo absent)" 'Expired entries pruned on write'
 
-  rm -f "$KEYWORDS_MOCK_ARGV"
+  must rm -f -- "$KEYWORDS_MOCK_ARGV"
   output=$("$KEYWORDS" --min-score 0.95 <<< 'Input text for cache reuse checks' 2>/dev/null) ||:
   assert_equals absent "$([[ -e $KEYWORDS_MOCK_ARGV ]] && echo present || echo absent)" \
     'A different --min-score reuses the cached result'
@@ -407,7 +381,7 @@ test_output_file_kept_on_failure() {
   # An unwritable destination is caught before the (paid) API call, not after it
   local -- output exit_code
   write_response "[$(text_block "$KEYWORDS_JSON")]"
-  rm -f "$KEYWORDS_MOCK_ARGV"
+  must rm -f -- "$KEYWORDS_MOCK_ARGV"
   output=$("$KEYWORDS" --no-cache -o "$TEST_DIR"/missing/out.txt <<< 'Input text for a missing directory' 2>&1) \
     && exit_code=0 || exit_code=$?
   assert_exit_code 1 "$exit_code" '-o into a missing directory exits 1'
@@ -452,12 +426,12 @@ test_inherited_path_ignored() {
 
   setup_test_env
   local -- decoy="$TEST_DIR"/decoy
-  mkdir -p "$decoy"
+  must mkdir -p -- "$decoy"
   printf '#!/bin/bash\ntouch %q\nexec /usr/bin/sha256sum "$@"\n' "$TEST_DIR"/decoy-ran > "$decoy"/sha256sum
-  chmod +x "$decoy"/sha256sum
+  must chmod +x -- "$decoy"/sha256sum
   export ANTHROPIC_API_KEY=test-key
 
-  PATH="$decoy:$ORIGINAL_PATH" "$KEYWORDS" --dry-run <<< 'Input text for the inherited PATH check' &>/dev/null ||:
+  env PATH="$decoy:$PATH" "$KEYWORDS" --dry-run <<< 'Input text for the inherited PATH check' &>/dev/null ||:
   assert_equals absent "$([[ -e $TEST_DIR/decoy-ran ]] && echo present || echo absent)" \
     'sha256sum not taken from the inherited PATH'
 
