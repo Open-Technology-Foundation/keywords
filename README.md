@@ -346,9 +346,9 @@ ls -la ~/.cache/keywords/
 
 | Scenario | Time | API Cost |
 |----------|------|----------|
-| First run (API call) | 1-3s | ~$0.001 |
+| First run (API call) | 1-3s | ~$0.0006 (Haiku) |
 | Cached result | <50ms | $0.00 |
-| Cache miss (different params) | 1-3s | ~$0.001 |
+| Cache miss (different params) | 1-3s | ~$0.0006 (Haiku) |
 
 ---
 
@@ -426,10 +426,10 @@ keywords -f json -o results.json document.txt
 
 ### Script Design
 
-Single-file Bash script (610 lines) with modular function design:
+Single-file Bash script (611 lines) with modular function design:
 
 ```
-keywords (610 lines)
+keywords (611 lines)
 ├── PATH lock, configuration & defaults
 ├── Helper functions
 │   ├── info(), success(), warn(), error(), die()
@@ -466,7 +466,7 @@ keywords (610 lines)
 | Shape check on `.keywords` | Array of objects with a string `term` | Bad replies fail loudly |
 | Key and text off argv | Header file on an fd; body on stdin | Nothing readable via `ps`; no 128 KB argument limit |
 | Fixed `PATH` | `~/.local/bin:/usr/local/bin:/usr/bin:/bin` | An inherited PATH cannot swap in another `curl` |
-| `curl --retry 2` | Retries timeouts, 408, 429, 5xx | Transient failures |
+| `curl --retry 2` | Retries timeouts, 408, 429, 500, 502, 503, 504 | Transient failures (not 529 overloaded) |
 | `${var@Q}` quoting | Shell-safe messages | Security, proper escaping |
 | Atomic cache writes | temp file + mv | Concurrency safety |
 | Staged `-o` output | temp file, copied on success | A failed run never empties the target |
@@ -630,7 +630,13 @@ done
 |----------|-------|--------|------|
 | First call (API) | 1-3s | 3-7s | 5-15s |
 | Cached result | <50ms | <50ms | <50ms |
-| API cost per call | ~$0.001 | ~$0.005 | ~$0.015 |
+| API cost per call | ~$0.0006 | ~$0.012 | ~$0.025 |
+
+Costs are list prices for `test-sample.txt` (198 words): an 841-token prompt and
+about 1,070 output tokens for 20 keywords, thinking included, as measured on Haiku 5.5.
+The Sonnet and Opus figures assume a similar output count. Output tokens are most of the
+cost; each extra 1,000 words of input adds roughly $0.00013 / $0.0026 / $0.0052. Haiku's
+rate rises to $0.50 / $2.50 per MTok for prompts over 100K tokens.
 
 ### Input Size Limits
 
@@ -649,7 +655,7 @@ done
    keywords document.txt  # Second call: Cache (free)
    ```
 
-2. **Use Haiku model** (20x cheaper than Opus)
+2. **Use Haiku model** (40x cheaper than Opus, 20x cheaper than Sonnet at list prices)
    ```bash
    keywords document.txt  # Default: haiku
    ```
@@ -694,7 +700,7 @@ done
 |-------|-------|----------|
 | `authentication_error` | Invalid API key | Check ANTHROPIC_API_KEY |
 | `rate_limit_error` | Too many requests | Wait, use caching |
-| `overloaded_error` | API overloaded | Retry later (curl already retries 429 and 5xx twice) |
+| `overloaded_error` | API overloaded (HTTP 529, which curl does not retry) | Retry later |
 | `Could not parse valid JSON` | API response issue | Retry, check API status |
 
 ### Binary File Handling

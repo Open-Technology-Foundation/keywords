@@ -476,11 +476,14 @@ Cache results for 24 hours to minimize API costs. The script automatically cache
 - Model used
 - Max keywords
 - Entity extraction flag
-- Min score threshold
+- Prompt version
+
+`--min-score` is applied to the cached result, so changing it costs no API call.
 
 ### Use Haiku model by default
 
-Haiku is 20x cheaper than Opus and 5x cheaper than Sonnet, with excellent quality for keyword extraction.
+At list prices Haiku is 40x cheaper than Opus and 20x cheaper than Sonnet (for prompts up to
+100K tokens), with excellent quality for keyword extraction.
 
 ### Batch process with caching enabled
 

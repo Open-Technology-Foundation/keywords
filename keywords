@@ -248,7 +248,8 @@ call_anthropic_api() {
 
   # The key goes to curl as a header file on a file descriptor: printf is a builtin,
   # so the value never appears in any process's argv (ps, /proc/PID/cmdline).
-  # --retry covers timeouts and HTTP 408/429/5xx; curl holds the body in memory to resend it
+  # --retry covers timeouts and HTTP 408, 429, 500, 502, 503 and 504, but not the API's
+  # 529 (overloaded); curl holds the body in memory to resend it
   response=$(curl -sS --max-time "$API_TIMEOUT" --connect-timeout 10 --retry 2 \
     -H @<(printf 'x-api-key: %s\n' "$ANTHROPIC_API_KEY") \
     -H "anthropic-version: $API_VERSION" \
