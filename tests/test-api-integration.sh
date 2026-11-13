@@ -29,7 +29,7 @@ mock_curl() {
   local -- fixture_file="$1"
   local -i mock_exit_code="${2:-0}"
 
-  cat > "$MOCK_DIR"/curl << 'MOCK_SCRIPT'
+  must_write "$MOCK_DIR"/curl << 'MOCK_SCRIPT'
 #!/usr/bin/env bash
 # Mock curl - returns fixture content
 cat "$KEYWORDS_MOCK_FIXTURE"
@@ -103,7 +103,7 @@ test_mocked_api_connection_failure() {
   local -- output exit_code
 
   # Create a mock that fails
-  cat > "$MOCK_DIR/curl" << 'MOCK_SCRIPT'
+  must_write "$MOCK_DIR"/curl << 'MOCK_SCRIPT'
 #!/usr/bin/env bash
 exit 7  # curl exit code for connection failure
 MOCK_SCRIPT
@@ -149,7 +149,7 @@ declare -r KEYWORDS_JSON='{"keywords":[{"term":"vector search","score":0.9,"type
 # Mock curl that returns $TEST_DIR/response.json and records what it was given:
 # its argv, the request body, and any header file passed as -H @FILE
 mock_curl_recording() {
-  cat > "$MOCK_DIR"/curl << 'MOCK_SCRIPT'
+  must_write "$MOCK_DIR"/curl << 'MOCK_SCRIPT'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$KEYWORDS_MOCK_ARGV"
 : > "$KEYWORDS_MOCK_HEADERS"
@@ -177,7 +177,8 @@ MOCK_SCRIPT
 write_response() {
   jq -n --argjson content "$1" --arg stop_reason "${2:-end_turn}" \
     '{type: "message", role: "assistant", content: $content, stop_reason: $stop_reason}' \
-    > "$TEST_DIR"/response.json
+    > "$TEST_DIR"/response.json \
+    || { >&2 echo "Test setup failed: cannot write ${TEST_DIR@Q}/response.json"; return 1; }
 }
 
 text_block() { jq -n --arg text "$1" '{type: "text", text: $text}'; }
@@ -329,7 +330,7 @@ test_cache_write_failure() {
   local -- output exit_code
   mock_curl_recording
   write_response "[$(text_block "$KEYWORDS_JSON")]"
-  : > "$TEST_DIR"/not-a-dir
+  must touch -- "$TEST_DIR"/not-a-dir
 
   output=$("$KEYWORDS" --cache-dir "$TEST_DIR"/not-a-dir/cache <<< 'Input text for an unwritable cache' 2>&1) \
     && exit_code=0 || exit_code=$?
@@ -351,7 +352,7 @@ test_cache_reuse_and_pruning() {
   mock_curl_recording
   write_response "[$(text_block "$KEYWORDS_JSON")]"
   must mkdir -p -- "${stale%/*}"
-  echo '{}' > "$stale"
+  must_write "$stale" <<< '{}'
   must touch -d '2 days ago' -- "$stale"
 
   "$KEYWORDS" <<< 'Input text for cache reuse checks' &>/dev/null ||:
@@ -404,7 +405,7 @@ test_output_file_kept_on_failure() {
   setup_test_env
   mock_curl_recording
   write_response '[]' refusal
-  echo 'previous results' > "$TEST_DIR"/out.txt
+  must_write "$TEST_DIR"/out.txt <<< 'previous results'
 
   "$KEYWORDS" --no-cache -o "$TEST_DIR"/out.txt <<< 'Input text for a failed extraction' &>/dev/null ||:
   assert_equals 'previous results' "$(< "$TEST_DIR"/out.txt)" '-o leaves the existing file alone on failure'
@@ -458,7 +459,8 @@ test_inherited_path_ignored() {
   setup_test_env
   local -- decoy="$TEST_DIR"/decoy
   must mkdir -p -- "$decoy"
-  printf '#!/bin/bash\ntouch %q\nexec /usr/bin/sha256sum "$@"\n' "$TEST_DIR"/decoy-ran > "$decoy"/sha256sum
+  printf '#!/bin/bash\ntouch %q\nexec /usr/bin/sha256sum "$@"\n' "$TEST_DIR"/decoy-ran \
+    | must_write "$decoy"/sha256sum
   must chmod -- +x "$decoy"/sha256sum
   export ANTHROPIC_API_KEY=test-key
 

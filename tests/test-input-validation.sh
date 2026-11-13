@@ -46,7 +46,7 @@ test_file_input() {
 
   # Unreadable file
   local -- unreadable="$TEST_DIR/unreadable.txt"
-  echo "Some test content for the unreadable file test" > "$unreadable"
+  must_write "$unreadable" <<< 'Some test content for the unreadable file test'
   must chmod -- 000 "$unreadable"
   output=$("$KEYWORDS" -- "$unreadable" 2>&1) && exit_code=0 || exit_code=$?
   # Restore permissions for cleanup
@@ -64,12 +64,12 @@ test_file_input() {
   fi
 
   # A text file that file(1) types as application/json is still text
-  echo '{"note": "plain text content about vector search"}' > "$TEST_DIR"/doc.json
+  must_write "$TEST_DIR"/doc.json <<< '{"note": "plain text content about vector search"}'
   output=$("$KEYWORDS" --dry-run -- "$TEST_DIR"/doc.json 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 0 "$exit_code" 'JSON-typed text file is accepted'
 
   # An empty file is empty input, not a binary file
-  : > "$TEST_DIR"/blank.txt
+  must touch -- "$TEST_DIR"/blank.txt
   output=$("$KEYWORDS" --dry-run -- "$TEST_DIR"/blank.txt 2>&1) && exit_code=0 || exit_code=$?
   assert_exit_code 1 "$exit_code" 'Empty file exits 1'
   assert_contains "$output" '[Ee]mpty' 'Empty file reported as empty'

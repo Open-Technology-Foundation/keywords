@@ -108,6 +108,12 @@ must() {
   "$@" || { >&2 echo "Test setup failed: ${*@Q}"; return 1; }
 }
 
+# must_write FILE: write stdin to FILE and name it if that fails. must cannot cover
+# 'must cmd > FILE': bash opens FILE before must runs, so a failed open bypasses it
+must_write() {
+  cat > "$1" || { >&2 echo "Test setup failed: cannot write ${1@Q}"; return 1; }
+}
+
 # A fresh HOME, cache and API key for one test. The keywords script locks PATH to
 # ~/.local/bin:/usr/local/bin:/usr/bin:/bin, so mocks go in this HOME's ~/.local/bin
 setup_test_env() {

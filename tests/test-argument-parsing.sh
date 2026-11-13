@@ -359,10 +359,10 @@ test_operands() {
   local -- output exit_code
   setup_test_env
   local -- text='Operand test input with enough characters to pass'
-  echo "$text" > "$TEST_DIR"/-notes.txt
-  echo "$text" > "$TEST_DIR"/a.txt
-  echo "$text" > "$TEST_DIR"/b.txt
-  : > "$TEST_DIR"/e
+  must_write "$TEST_DIR"/-notes.txt <<< "$text"
+  must_write "$TEST_DIR"/a.txt <<< "$text"
+  must_write "$TEST_DIR"/b.txt <<< "$text"
+  must touch -- "$TEST_DIR"/e
 
   # Bundles must not pick up letters from filenames in the working directory
   output=$(cd -- "$TEST_DIR" && "$KEYWORDS" '-q?' --help 2>&1) && exit_code=0 || exit_code=$?
