@@ -426,10 +426,10 @@ keywords -f json -o results.json document.txt
 
 ### Script Design
 
-Single-file Bash script (611 lines) with modular function design:
+Single-file Bash script (627 lines) with modular function design:
 
 ```
-keywords (611 lines)
+keywords (627 lines)
 ├── PATH lock, configuration & defaults
 ├── Helper functions
 │   ├── info(), success(), warn(), error(), die()
@@ -784,6 +784,15 @@ GPL-3.0
 ---
 
 ## Version History
+
+- **1.1.1** - Fixes, effort and ordering
+  - `--cache-dir` values starting with `-` no longer delete files in the current directory;
+    an empty value is an error
+  - Failed internal steps report their own error (stdin pointing at a directory, for one)
+  - Requests set effort `low`: faster on short inputs, and the same on all three models
+  - Keywords sorted by descending score; `-n` keeps the highest-scoring ones
+  - Cache: prompt version 4, so entries from earlier versions are not reused
+  - Test suite: 251 assertions
 
 - **1.1.0** - Audit fixes
   - Claude 5.5 models only (Haiku, Sonnet, Opus); `--temperature` removed

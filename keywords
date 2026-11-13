@@ -8,7 +8,7 @@ shopt -s inherit_errexit shift_verbose nullglob extglob
 declare -rx PATH=~/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 ### VERSION managed by version
-declare -r VERSION=1.1.0
+declare -r VERSION=1.1.1
 ###
 #shellcheck disable=SC2155  # realpath of our own path does not fail; declare -r needs one statement
 declare -r SCRIPT_PATH=$(realpath -- "${BASH_SOURCE[0]}")

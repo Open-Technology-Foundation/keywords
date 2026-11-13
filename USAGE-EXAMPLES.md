@@ -6,7 +6,7 @@ Check the version:
 
 ```bash
 $ keywords --version
-keywords 1.1.0
+keywords 1.1.1
 ```
 
 ## Setup
