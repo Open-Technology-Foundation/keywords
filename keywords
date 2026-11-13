@@ -25,6 +25,9 @@ declare -i MAX_KEYWORDS=20
 declare -i API_TIMEOUT=60
 # Thinking tokens count against this cap on models that think by default
 declare -i MAX_TOKENS=8000
+# Each model has its own default effort (Haiku/Opus medium, Sonnet high); keyword extraction
+# gains nothing from deeper thinking (measured), so low keeps all three fast and alike
+declare -r EFFORT=low
 declare -i STOPWORDS=0
 declare -i USE_CACHE=1
 declare -i INCLUDE_SCORES=0
@@ -39,8 +42,9 @@ declare -- CACHE_DIR=${XDG_CACHE_HOME:-$HOME/.cache}/keywords
 
 # Cache settings
 declare -ri CACHE_TTL=86400
-# Part of the cache key: bump it when build_prompt changes so old results are not reused
-declare -r PROMPT_VERSION='2'
+# Part of the cache key: bump it when the prompt or the request settings change, so old
+# results are not reused (3: effort low)
+declare -r PROMPT_VERSION='3'
 
 # Run state
 declare -i CACHE_HITS=0
@@ -241,7 +245,9 @@ call_anthropic_api() {
     --arg model "$ANTHROPIC_MODEL" \
     --argjson max_tokens "$MAX_TOKENS" \
     --rawfile prompt <(printf '%s' "$1") \
-    '{model: $model, max_tokens: $max_tokens, messages: [{role: "user", content: $prompt}]}') || {
+    --arg effort "$EFFORT" \
+    '{model: $model, max_tokens: $max_tokens, output_config: {effort: $effort},
+      messages: [{role: "user", content: $prompt}]}') || {
     error 'Failed to build API request'
     return 1
   }

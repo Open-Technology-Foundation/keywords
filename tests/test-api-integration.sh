@@ -241,6 +241,8 @@ test_request_body_defaults() {
   echo 'Test input for inspecting the default request body' | "$KEYWORDS" --no-cache &>/dev/null ||:
   assert_equals false "$(jq -r 'has("temperature")' < "$KEYWORDS_MOCK_BODY")" 'temperature is not sent by default'
   assert_equals 8000 "$(jq -r '.max_tokens' < "$KEYWORDS_MOCK_BODY")" 'Default max_tokens leaves room for thinking'
+  assert_equals low "$(jq -r '.output_config.effort' < "$KEYWORDS_MOCK_BODY")" \
+    'Effort is set explicitly, not left to per-model defaults'
   assert_contains "$(< "$KEYWORDS_MOCK_ARGV")" '--retry' 'Transient failures are retried'
 
   unmock_curl

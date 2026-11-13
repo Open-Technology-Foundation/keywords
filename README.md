@@ -630,12 +630,12 @@ done
 |----------|-------|--------|------|
 | First call (API) | 1-3s | 3-7s | 5-15s |
 | Cached result | <50ms | <50ms | <50ms |
-| API cost per call | ~$0.0006 | ~$0.012 | ~$0.025 |
+| API cost per call | ~$0.0004 | ~$0.008 | ~$0.015 |
 
-Costs are list prices for `test-sample.txt` (198 words): an 841-token prompt and
-about 1,070 output tokens for 20 keywords, thinking included, as measured on Haiku 5.5.
-The Sonnet and Opus figures assume a similar output count. Output tokens are most of the
-cost; each extra 1,000 words of input adds roughly $0.00013 / $0.0026 / $0.0052. Haiku's
+Costs are list prices for `test-sample.txt` (198 words): an 841-token prompt and about
+600 output tokens for 20 keywords, as measured on all three models. Requests use effort
+`low`, at which the models rarely think for this task, so the output is little more than
+the keyword JSON. Output tokens are most of the cost; each extra 1,000 words of input adds roughly $0.00013 / $0.0026 / $0.0052. Haiku's
 rate rises to $0.50 / $2.50 per MTok for prompts over 100K tokens.
 
 ### Input Size Limits
