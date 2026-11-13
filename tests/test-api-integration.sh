@@ -307,6 +307,27 @@ test_csv_quoting() {
   cleanup_test_env
 }
 
+test_keywords_sorted_by_score() {
+  test_section 'Keywords Sorted by Score'
+
+  setup_test_env
+  local -- output unsorted
+  mock_curl_recording
+  # A non-numeric score must sort last, not make the reply unparseable
+  unsorted='{"keywords":[{"term":"low","score":0.5},{"term":"odd","score":"n/a"},'
+  unsorted+='{"term":"top","score":0.9},{"term":"mid","score":0.7}]}'
+  write_response "[$(text_block "$unsorted")]"
+
+  output=$("$KEYWORDS" --no-cache <<< 'Input text for checking keyword order' 2>/dev/null) ||:
+  assert_equals $'top\nmid\nlow\nodd' "$output" 'Keywords are listed by descending score'
+
+  output=$("$KEYWORDS" --no-cache -n 2 <<< 'Input text for checking keyword order' 2>/dev/null) ||:
+  assert_equals $'top\nmid' "$output" '-n keeps the highest-scoring keywords'
+
+  unmock_curl
+  cleanup_test_env
+}
+
 test_statistics_counters() {
   test_section 'Statistics Counters'
 
@@ -547,6 +568,7 @@ main() {
   test_api_key_not_on_command_line
   test_large_input
   test_csv_quoting
+  test_keywords_sorted_by_score
   test_statistics_counters
   test_cache_write_failure
   test_cache_reuse_and_pruning

@@ -42,9 +42,9 @@ declare -- CACHE_DIR=${XDG_CACHE_HOME:-$HOME/.cache}/keywords
 
 # Cache settings
 declare -ri CACHE_TTL=86400
-# Part of the cache key: bump it when the prompt or the request settings change, so old
-# results are not reused (3: effort low)
-declare -r PROMPT_VERSION='3'
+# Part of the cache key: bump it when the prompt, the request settings or the stored
+# result change, so old results are not reused (3: effort low; 4: sorted by score)
+declare -r PROMPT_VERSION='4'
 
 # Run state
 declare -i CACHE_HITS=0
@@ -308,9 +308,12 @@ parse_json_result() {
   if [[ $json == *'{'*'}'* ]]; then
     json=${json#*\{}
     json=${json%\}*}
+    # Sort before the cut so -n keeps the highest scores; a missing or non-numeric
+    # score sorts as 0 instead of failing the parse
     if json=$(jq -ce --argjson n "$MAX_KEYWORDS" '
         select(.keywords | type == "array" and all(.[]; (.term | type) == "string"))
-        | .keywords |= .[:$n]' <<< "{$json}" 2>/dev/null); then
+        | .keywords |= (sort_by(-(.score | numbers // 0)) | .[:$n])
+        ' <<< "{$json}" 2>/dev/null); then
       printf '%s' "$json"
       return 0
     fi
